@@ -1,7 +1,7 @@
-use bill_analysis::Bill;
+use bill_analysis::bill::Bill;
 
 fn main() {
     println!("Hello, world!!");
-    let bills = bill_analysis::Bill::parse_csv("tests/azure_test_data.csv").unwrap();
+    let bills = Bill::parse_csv("tests/azure_test_data.csv").unwrap();
     println!("{:?}", bills);
 }
