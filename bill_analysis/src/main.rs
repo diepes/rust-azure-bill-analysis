@@ -8,9 +8,7 @@ fn main() {
         "202306", "202307", "202308", "202309", "202310", "202311", "202312", "202401", "202402",
         "202403", "202404",
     ] {
-        let csv_file_name = format!(
-            "/Users/324157/Documents/TWG-Azure/Cost/Detail_Enrollment_70785102_{date}_en.csv"
-        );
+        let csv_file_name = format!("csv_data/Detail_Enrollment_70785102_{date}_en.csv");
         let bills: Bills = Bill::parse_csv(&csv_file_name).unwrap();
         println!();
         println!(
