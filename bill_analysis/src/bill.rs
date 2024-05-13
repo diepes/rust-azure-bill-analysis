@@ -14,9 +14,14 @@ pub struct Bill {
     date: String,
     product: String,
     meter_id: String,
-    meter_name: String,
-    quantity: Option<f64>,
-    cost: Option<f64>,
+    meter_category: String, // e.g. "Virtual Network"
+    meter_sub_category: String, // e.g. "Peering"
+    meter_name: String, // e.g. "Intra-Region Ingress"
+    quantity: f64,
+    effective_price: f64,
+    cost: f64,
+    // UnitPrice,TotalUsedSavings,TotalUnused
+    unit_price: f64,
 }
 
 impl Bill {
@@ -55,18 +60,19 @@ mod tests {
         let bills = result.unwrap();
 
         // Assert that the number of bills is correct
-        assert_eq!(bills.len(), 9);
+        assert_eq!(bills.len(), 8);
 
         // Assert the values of the first bill
-        let first_bill = &bills[1];
+        let first_bill = &bills[0];
         assert_eq!(first_bill.subscription_id, "fc123456-7890-1234-5678-901234567890","subscription_id mismatch");
         assert_eq!(first_bill.subscription_name, "TstNl", "subscription_name mismatch");
         assert_eq!(first_bill.date, "03/08/2024", "date mismatch");
         assert_eq!(first_bill.product, "TestVirtNet-Intra-Region", "product mismatch");
         assert_eq!(first_bill.meter_id, "59bc01e3-test-4b9f-bacf-35e696aad6d4", "meter_id mismatch");
+
         assert_eq!(first_bill.meter_name, "Intra-Region Ingress", "meter_name mismatch");
-        assert_eq!(first_bill.quantity, Some(0.194368534), "quantity mismatch");
-        assert_eq!(first_bill.cost, Some(0.003025655), "cost mismatch");
+        assert_eq!(first_bill.quantity, (0.194368534), "quantity mismatch");
+        assert_eq!(first_bill.cost, (0.003025655), "cost mismatch");
 
     }
 }
