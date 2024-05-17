@@ -28,9 +28,9 @@ fn main() {
         );
         print!("Total Used Savings {:.2} {cur}", bills.total_used_savings());
         let category = "Virtual Machines";
-        print!("Savings '{category}' {:.2} {cur}", bills.savings(&category));
+        print!("Savings '{category}' {:.2} {cur}", bills.savings(category));
         let category = "Azure App Service";
-        print!("Savings '{category}' {:.2} {cur}", bills.savings(&category));
+        print!("Savings '{category}' {:.2} {cur}", bills.savings(category));
         println!();
     }
 }

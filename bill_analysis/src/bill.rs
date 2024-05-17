@@ -7,6 +7,7 @@ use std::path::Path;
 //struct to hold bill data for Azure detailed Enrollment csv parsed file
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
+#[allow(unused)]
 pub struct Bill {
     // SubscriptionId
     subscription_id: String,
@@ -81,7 +82,7 @@ impl Bills {
     pub fn total_used_savings(&self) -> f64 {
         self.bills.iter().fold(0.0, |acc, bill| {
             // if bill.benefit_name != "" && bill.charge_type == "Usage" {
-            if bill.reservation_name != "" && bill.charge_type == "Usage" {
+            if !bill.reservation_name.is_empty() && bill.charge_type == "Usage" {
                 acc + (bill.unit_price - bill.effective_price) * bill.quantity
             } else {
                 acc
@@ -101,7 +102,7 @@ impl Bills {
     // benefit_name != "" && charge_type == "Usage" && meter_category == Input then sum the (unit_price - effective_price) * quantity for each bill
     pub fn savings(&self, meter_category: &str) -> f64 {
         self.bills.iter().fold(0.0, |acc, bill| {
-            if bill.benefit_name != ""
+            if !bill.benefit_name.is_empty()
                 && bill.charge_type == "Usage"
                 && bill.meter_category == meter_category
             {
@@ -115,13 +116,19 @@ impl Bills {
     pub fn len(&self) -> usize {
         self.bills.len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.bills.is_empty()
+    }
+
     fn push(&mut self, bill: Bill) {
         self.bills.push(bill);
     }
+
     // Function to get the BillingCurrency by ensuring all BillingCurrency fields are the same and saving the value in Option<billing_currency>
     pub fn set_billing_currency(&mut self) -> Result<String, Box<dyn Error>> {
         if self.billing_currency.is_some() {
-            return Ok(self.billing_currency.as_ref().unwrap().clone());
+            Ok(self.billing_currency.as_ref().unwrap().clone())
         } else {
             let currency = &self.bills[0].billing_currency;
             for bill in &self.bills {
@@ -130,13 +137,15 @@ impl Bills {
                 }
             }
             self.billing_currency = Some(currency.clone());
-            return Ok(currency.clone());
+            Ok(currency.clone())
         }
     }
+
     pub fn get_billing_currency(&self) -> String {
         self.billing_currency.as_ref().unwrap().clone()
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
