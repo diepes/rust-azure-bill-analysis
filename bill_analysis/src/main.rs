@@ -1,18 +1,21 @@
+use bill_analysis::az_disk::{AzDisk, AzDisks};
 use bill_analysis::bill::{Bill, Bills};
 use std::path;
 
 fn main() {
-    println!("Hello, world!! Calculating Azure savings form Amortized charges csv export.");
-    // let csv_file_name = "tests/azure_test_data_01.csv";
-    for date in &[
-        "202306", "202307", "202308", "202309", "202310", "202311", "202312", "202401", "202402",
-        "202403", "202404",
-    ] {
-        let csv_file_name = format!("csv_data/Detail_Enrollment_70785102_{date}_en.csv");
-        let bills: Bills = Bill::parse_csv(&csv_file_name).unwrap();
+    println!("Hello, world!! Calculating Azure savings form Amortized charges csv export.\n");
+    let folder = "csv_data";
+    let files =
+        bill_analysis::find_files::in_folder(&folder, r"Detail_Enrollment_70785102_.*_en.csv");
+    println!("Found {:?} csv files.", files.len());
+    for csv_file_name in files {
+        // combine folder and csv_file_name into file_path
+        let file_path = format!("{}/{}", folder, csv_file_name);
+        let bills: Bills = Bill::parse_csv(&file_path)
+            .expect(&format!("Error parsing the file {}", csv_file_name));
         println!();
         println!(
-            "{date}: Num of records in csv {len:?}  '{f_name}'",
+            "Read {len:?} records from '{f_name}'",
             len = bills.len(),
             f_name = csv_file_name.split(path::is_separator).last().unwrap(),
         );

@@ -1,9 +1,7 @@
-use csv::{Reader, ReaderBuilder, StringRecord};
+use csv::ReaderBuilder;
 use serde::Deserialize;
 use std::error::Error;
 use std::fs::File;
-use std::io::{self, BufRead};
-use std::path::Path;
 
 //struct to hold bill data for Azure detailed Enrollment csv parsed file
 #[derive(Debug, Deserialize)]
