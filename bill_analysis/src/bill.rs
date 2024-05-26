@@ -2,7 +2,7 @@ use csv::Reader;
 use serde::Deserialize;
 use std::error::Error;
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 //struct to hold bill data for Azure detailed Enrollment csv parsed file
 #[derive(Debug, Deserialize)]
@@ -39,7 +39,7 @@ pub struct Bill {
 
 impl Bill {
     // Function to parse the CSV file and return a vector of Bill structs
-    pub fn parse_csv(file_path: &str) -> Result<Bills, Box<dyn Error>> {
+    pub fn parse_csv(file_path: &PathBuf) -> Result<Bills, Box<dyn Error>> {
         let file = File::open(Path::new(file_path))?;
         let mut reader = Reader::from_reader(file);
 
@@ -152,7 +152,7 @@ mod tests {
 
     #[test]
     fn test_parse_csv() {
-        let file_name = "tests/azure_test_data_01.csv";
+        let file_name: PathBuf = PathBuf::from("tests/azure_test_data_01.csv");
         // Test file path
         let file_path = &file_name;
 
@@ -162,7 +162,7 @@ mod tests {
         // Assert that parsing was successful
         assert!(
             result.is_ok(),
-            "!Error parsing the file:'{file_name}'\nERR:{}",
+            "!Error parsing the file:'{file_name:?}'\nERR:{}",
             result.err().unwrap()
         );
 
