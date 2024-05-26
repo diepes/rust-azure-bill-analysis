@@ -12,7 +12,6 @@ pub struct App {
     // Commands to run
     #[command(subcommand)]
     pub command: Commands,
-    
 }
 
 #[derive(Subcommand, Debug)]
@@ -25,15 +24,15 @@ pub enum Commands {
 }
 #[derive(Debug, Args)]
 pub struct BillSummaryArgs {
-    // /// Path to find Azure bill's csv files 
+    // /// Path to find Azure bill's csv files
     #[arg(short, long, default_value = "./csv_data/")]
     pub billpath: PathBuf,
     // // a list of other write args
 }
 #[derive(Debug, Args)]
 pub struct DiskPriceArgs {
-    /// Path to find Azure disk's csv files 
-    #[arg(short, long, default_value = "Azuredisks-Unattached-20240517.csv")]
+    /// Path to find Azure disk's csv files
+    #[arg(short, long, default_value = "../Azuredisks-Unattached-20240517.csv")]
     pub diskfile: PathBuf,
 }
 
@@ -44,5 +43,4 @@ pub struct GlobalOpts {
     pub debug: bool,
     #[arg(short, long, default_value = "csv_data")]
     pub billpath: Option<PathBuf>,
-    
 }

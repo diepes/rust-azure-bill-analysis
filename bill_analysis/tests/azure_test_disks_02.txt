@@ -1,0 +1,5 @@
+y-prd-xint-datadsk-01-0
+y-prd-xint-osdsk-01
+y-prd-xile-datadsk-01-0
+y-prd-xile-datadsk-01-1
+y-prd-xile-datadsk-01-2

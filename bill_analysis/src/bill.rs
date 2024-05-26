@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 #[allow(unused)]
-pub struct Bill {
+pub struct BillEntry {
     // SubscriptionId
     subscription_id: String,
     subscription_name: String,
@@ -37,8 +37,8 @@ pub struct Bill {
     benefit_name: String,
 }
 
-impl Bill {
-    // Function to parse the CSV file and return a vector of Bill structs
+impl BillEntry {
+    // Function to parse the CSV file and return a vector of BillEntry structs
     pub fn parse_csv(file_path: &PathBuf) -> Result<Bills, Box<dyn Error>> {
         let file = File::open(Path::new(file_path))?;
         let mut reader = Reader::from_reader(file);
@@ -46,7 +46,7 @@ impl Bill {
         let mut bills = Bills::default();
 
         for result in reader.deserialize() {
-            let bill: Bill = result?;
+            let bill: BillEntry = result?;
             bills.push(bill);
         }
         bills.set_billing_currency()?;
@@ -56,7 +56,7 @@ impl Bill {
 }
 
 pub struct Bills {
-    bills: Vec<Bill>,
+    bills: Vec<BillEntry>,
     billing_currency: Option<String>,
 }
 impl Bills {
@@ -121,7 +121,7 @@ impl Bills {
         self.bills.is_empty()
     }
 
-    fn push(&mut self, bill: Bill) {
+    fn push(&mut self, bill: BillEntry) {
         self.bills.push(bill);
     }
 
@@ -157,7 +157,7 @@ mod tests {
         let file_path = &file_name;
 
         // Parse the CSV file
-        let result = Bill::parse_csv(file_path);
+        let result = BillEntry::parse_csv(file_path);
 
         // Assert that parsing was successful
         assert!(

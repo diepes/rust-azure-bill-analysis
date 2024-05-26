@@ -1,7 +1,7 @@
 use bill_analysis::az_disk::{AzDisk, AzDisks};
-use bill_analysis::bill::{Bill, Bills};
-use bill_analysis::cmd_parse::Commands;
+use bill_analysis::bill::{BillEntry, Bills};
 use bill_analysis::cmd_parse::App;
+use bill_analysis::cmd_parse::Commands;
 
 use clap::Parser; // Add this line to import the `Parser` trait from the `clap` crate
 
@@ -19,8 +19,7 @@ fn main() {
         }
         Commands::DiskPrice(args) => {
             println!("Running DiskPrice command with diskpath: {:?}", args);
+            bill_analysis::calc_disk_cost(args.diskfile, app.global_opts.billpath.unwrap());
         }
     }
-
 }
-
