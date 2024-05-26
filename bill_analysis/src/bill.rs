@@ -26,6 +26,8 @@ pub struct BillEntry {
     // UnitPrice,TotalUsedSavings,TotalUnused
     unit_price: f64,
     reservation_name: String,
+    resource_id: String,
+    resource_name: String,
     // PlanName,ChargeType,Frequency
     plan_name: String,
     charge_type: String,
@@ -112,7 +114,16 @@ impl Bills {
             }
         })
     }
-
+    pub fn cost_by_resource_name(&self, resource_name: &str) -> f64 {
+        self.bills.iter().fold(0.0, |acc, bill| {
+            // bill.subscription_name == resource_group &&
+            if  bill.resource_name == resource_name {
+                acc + bill.cost
+            } else {
+                acc
+            }
+        })
+    }
     pub fn len(&self) -> usize {
         self.bills.len()
     }
@@ -150,6 +161,23 @@ impl Bills {
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_cost_by_resource_name() {
+        let file_name: PathBuf = PathBuf::from("tests/azure_test_data_01.csv");
+        let result = BillEntry::parse_csv(&file_name);
+        // Assert that parsing was successful
+        assert!(
+            result.is_ok(),
+            "!Error parsing the file:'{file_name:?}'\nERR:{}",
+            result.err().unwrap()
+        );
+        // Get the parsed bills
+        let bills = result.unwrap();
+
+        // Test the cost_by_resource_name function
+        let cost = bills.cost_by_resource_name("NLSYDWAVAP01P-OSdisk-00_ide_0_869850_GXMD_40cfb0");
+        assert_eq!(cost, 0.002785917);
+    }
     #[test]
     fn test_parse_csv() {
         let file_name: PathBuf = PathBuf::from("tests/azure_test_data_01.csv");
