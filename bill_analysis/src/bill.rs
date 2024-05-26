@@ -117,7 +117,7 @@ impl Bills {
     pub fn cost_by_resource_name(&self, resource_name: &str) -> f64 {
         self.bills.iter().fold(0.0, |acc, bill| {
             // bill.subscription_name == resource_group &&
-            if  bill.resource_name == resource_name {
+            if bill.resource_name == resource_name {
                 acc + bill.cost
             } else {
                 acc

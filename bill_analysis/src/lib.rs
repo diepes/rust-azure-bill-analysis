@@ -25,8 +25,8 @@ pub fn calc_disk_cost(file_disk: PathBuf, folder: PathBuf) {
     let cur = latest_bill.get_billing_currency();
     let mut total_cost: f64 = 0.0;
     for disk in &disks.disks {
-        let disk_cost = latest_bill.cost_by_resource_name( &disk.name);
-        println!("cost {cur} {disk_cost:.2} - disk: {:?} ", disk.name);
+        let disk_cost = latest_bill.cost_by_resource_name(&disk.name);
+        println!("cost {cur} {disk_cost:7.2} - disk: {:?} ", disk.name);
         total_cost += disk_cost;
     }
     println!("Total cost {cur} {total_cost:.2}");
