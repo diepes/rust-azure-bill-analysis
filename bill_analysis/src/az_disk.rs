@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::error::Error;
 use std::fs::File;
 use std::io::BufRead;
-use std::path::{Path, PathBuf}; // Import the BufRead trait
+use std::path::PathBuf; // Import the BufRead trait
 
 //struct to hold bill data for Azure detailed Enrollment csv parsed file
 #[derive(Debug, Deserialize)]
@@ -56,9 +56,6 @@ impl AzDisks {
         };
         Ok(disks)
     }
-    /**
-    Function to parse the CSV file and return a vector of AzDisk structs
-    */
     fn parse_csv(file_path: &PathBuf) -> Result<AzDisks, Box<dyn Error>> {
         // Create a new Bills instance
         let mut az_disks = AzDisks::default();

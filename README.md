@@ -3,16 +3,28 @@
 Rust tool to summarize Detailed Azure bill
 
 ## Subcommands
- * in folder ./bill_analysis
-   * cargo run -- -h
+
+* in folder ./bill_analysis
+  * cargo run -- -h
 
 ### Command bill-summary
- * Reads multiple Azure billing CSV's and print some sumary info regarding reservations, and unused reservations.
 
+* Reads multiple Azure billing CSV's and print some sumary info regarding reservations, and unused reservations.
 
-### Command disk-price
- * Takes csv or txt file of disk names and does lookup in latest bill printing the cost for each disk.
- 
+### Command resource-price
+
+* Takes csv or txt file of disk names and does lookup in latest bill printing the cost for each disk.
+
+       cargo run -- resource-price --diskfile ../Azuredisks-Jira-PPD-29997.txt
+
+* Get cost total for all subscriptions containing a '7'
+
+       cargo run -- --bill-path ./csv_data/Detail_Enrollment_70785102_202403_en.csv resource-price --subscription ".*7.*"
+
+* RG summary
+
+       cargo run -- resource-price --
+
 
 ## Run in watch/debug mode
 

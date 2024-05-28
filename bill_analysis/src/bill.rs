@@ -1,4 +1,5 @@
 use csv::Reader;
+use regex::Regex;
 use serde::Deserialize;
 use std::error::Error;
 use std::fs::File;
@@ -28,6 +29,7 @@ pub struct BillEntry {
     reservation_name: String,
     resource_id: String,
     resource_name: String,
+    resource_group: String,
     // PlanName,ChargeType,Frequency
     plan_name: String,
     charge_type: String,
@@ -44,9 +46,7 @@ impl BillEntry {
     pub fn parse_csv(file_path: &PathBuf) -> Result<Bills, Box<dyn Error>> {
         let file = File::open(Path::new(file_path))?;
         let mut reader = Reader::from_reader(file);
-
         let mut bills = Bills::default();
-
         for result in reader.deserialize() {
             let bill: BillEntry = result?;
             bills.push(bill);
@@ -124,6 +124,43 @@ impl Bills {
             }
         })
     }
+    pub fn cost_by_resource_group(
+        &self,
+        resource_group: &str,
+    ) -> (f64, std::collections::HashSet<String>) {
+        let re_rg = Regex::new(resource_group).unwrap();
+        // collect set of resource groups in set rgs
+        let mut rgs = std::collections::HashSet::new();
+        let bill = self.bills.iter().fold(0.0, |acc, bill| {
+            if re_rg.is_match(&bill.resource_group) {
+                rgs.insert(bill.resource_group.clone());
+                acc + bill.cost
+            } else {
+                acc
+            }
+        });
+        (bill, rgs)
+    }
+
+    /// Similar to cost_by_resource_group, for cost_by_subscription
+    pub fn cost_by_subscription(
+        &self,
+        subscription_name: &str,
+    ) -> (f64, std::collections::HashSet<String>) {
+        let re_subs = Regex::new(subscription_name).unwrap();
+        // collect set of resource groups in set rgs
+        let mut subs = std::collections::HashSet::new();
+        let bill = self.bills.iter().fold(0.0, |acc, bill| {
+            if re_subs.is_match(&bill.subscription_name) {
+                subs.insert(bill.subscription_name.clone());
+                acc + bill.cost
+            } else {
+                acc
+            }
+        });
+        (bill, subs)
+    }
+
     pub fn len(&self) -> usize {
         self.bills.len()
     }
