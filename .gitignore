@@ -19,3 +19,8 @@ csv_data
 
 # vscode
 .vscode
+
+# Ignore local data files
+.DS_Store
+Azure*-Jira-*
+Azuredisks-*.csv

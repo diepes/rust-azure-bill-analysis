@@ -18,6 +18,7 @@ pub struct App {
 pub enum Commands {
     BillSummary(BillSummaryArgs),
     ResourcePrice(ResourcePriceArgs),
+    DiskCsvSavings(DiskCsvSavingsArgs),
     // /// Number of times to greet
     // #[arg(short, long, default_value_t = 1)]
     // pub count: u8,
@@ -39,7 +40,12 @@ pub struct ResourcePriceArgs {
     #[arg(short, long)]
     pub subscription: Option<String>,
 }
-
+#[derive(Debug, Args)]
+pub struct DiskCsvSavingsArgs {
+    /// Path to find Azure disk's csv files
+    #[arg(short, long, default_value = "../Azuredisks-Unattached-20240517.csv")]
+    pub diskfile: PathBuf,
+}
 #[derive(Debug, Args)]
 pub struct GlobalOpts {
     /// Activate debug mode

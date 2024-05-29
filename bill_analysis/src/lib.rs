@@ -17,6 +17,7 @@ pub fn calc_resource_group_cost(resource_group: &str, file_or_folder: PathBuf) {
     total_cost += rg_cost;
     println!("Total cost {cur} {total_cost:.2} rg's:{:?}", rgs);
 }
+
 // function calc_subscription_cost
 pub fn calc_subscription_cost(subscription: &str, file_or_folder: PathBuf) {
     println!("Hello, world!! Calculating Azure subscription:{subscription} cost from csv export.\n");
@@ -68,6 +69,7 @@ pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: PathBuf) {
         println!("cost {cur} {disk_cost:7.2} - disk: {:?} ", disk.name);
         total_cost += disk_cost;
     }
+    println!("    from file '{:?}'", file_name_bill);
     println!("Total cost {cur} {total_cost:.2}");
 }
 

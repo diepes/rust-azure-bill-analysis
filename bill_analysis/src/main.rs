@@ -2,7 +2,6 @@
 // use bill_analysis::bill::{BillEntry, Bills};
 //use bill_analysis::cmd_parse::App;
 use bill_analysis::cmd_parse::Commands;
-
 use clap::Parser; // Add this line to import the `Parser` trait from the `clap` crate
 
 fn main() {
@@ -33,9 +32,10 @@ fn main() {
                     app.global_opts.bill_path.unwrap(),
                 );
             
-            }else {
-                bill_analysis::calc_disks_cost(args.diskfile, app.global_opts.bill_path.unwrap());
             }
+        }
+        Commands::DiskCsvSavings(args) => {
+                bill_analysis::calc_disks_cost(args.diskfile, app.global_opts.bill_path.unwrap());
         }
     }
 }
