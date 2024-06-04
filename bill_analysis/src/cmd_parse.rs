@@ -11,7 +11,19 @@ pub struct App {
     pub global_opts: GlobalOpts,
     // Commands to run
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
+    /// regex find to filter on specific resource name, if not using diskfile option.'$'
+    #[arg(short, long)]
+    pub name_regex: Option<String>,
+    /// regex find to filter on resource group terminate with '$'
+    #[arg(short, long)]
+    pub resource_group: Option<String>,
+    /// regex find to filter on subscriptions terminate with '$'
+    #[arg(short, long)]
+    pub subscription: Option<String>,
+    /// regex find to filter on meter category terminate with '$'
+    #[arg(short, long)]
+    pub meter_category: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -35,8 +47,13 @@ pub struct ResourcePriceArgs {
     /// Path to find Azure disk's csv files
     #[arg(short, long, default_value = "../Azuredisks-Unattached-20240517.csv")]
     pub diskfile: PathBuf,
+    /// regex find to filter on specific resource name, if not using diskfile option.'$'
+    #[arg(short, long)]
+    pub name_regex: Option<String>,
+    /// regex find to filter on resource group terminate with '$'
     #[arg(short, long)]
     pub resource_group: Option<String>,
+    /// regex find to filter on subscriptions terminate with '$'
     #[arg(short, long)]
     pub subscription: Option<String>,
 }

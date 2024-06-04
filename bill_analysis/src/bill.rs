@@ -124,6 +124,100 @@ impl Bills {
             }
         })
     }
+    // cost_by_resource_name_regex
+    // returns the total cost of all bills in the resource_name and a set of all resource names matched.
+    pub fn cost_by_resource_name_regex(
+        &self,
+        resource_regex: &str,
+    ) -> (f64, std::collections::HashSet<String>) {
+        let re_res = Regex::new(resource_regex).unwrap();
+        // collect set of resource groups in set rgs
+        let mut res_details = std::collections::HashSet::new();
+        let bill = self.bills.iter().fold(0.0, |acc, bill| {
+            if re_res.is_match(&bill.resource_name) {
+                res_details.insert(format!(
+                    "{}___{}",
+                    bill.resource_group.clone(),
+                    bill.resource_name.clone(),
+                ));
+                acc + bill.cost
+            } else {
+                acc
+            }
+        });
+        (bill, res_details)
+    }
+
+    // function cost_by_any
+    // takes name_regex, rg_regex, subs_regex, meter_category and returns total where all match, if empty str in input it is skiped for match.
+    pub fn cost_by_any(
+        &self,
+        name_regex: &str,
+        rg_regex: &str,
+        subs_regex: &str,
+        meter_category: &str,
+    ) -> (
+        f64,
+        std::collections::HashSet<String>,
+        std::collections::HashMap<(CostType, String), f64>,
+    ) {
+        let re_name = Regex::new(name_regex).unwrap();
+        let re_rg = Regex::new(rg_regex).unwrap();
+        let re_subs = Regex::new(subs_regex).unwrap();
+        let re_type = Regex::new(meter_category).unwrap();
+        // collect set of resource groups in set rgs
+        let mut res_details = std::collections::HashSet::new();
+        // bill_details record cost per filter category e.g. name_regex, rg_regex, subs_regex, meter_category
+        let mut bill_details = std::collections::HashMap::new();
+
+        let bill = self.bills.iter().fold(0.0, |acc, bill| {
+            let mut flag_match = true;
+            if !name_regex.is_empty() && !re_name.is_match(&bill.resource_name) {
+                flag_match = false; // no match
+            } else if !rg_regex.is_empty() && !re_rg.is_match(&bill.resource_group) {
+                flag_match = false;
+            } else if !subs_regex.is_empty() && !re_subs.is_match(&bill.subscription_name) {
+                flag_match = false;
+            } else if !meter_category.is_empty() && !re_type.is_match(&bill.meter_category) {
+                flag_match = false;
+            }
+            if flag_match {
+                // if all match
+
+                bill_details
+                    .entry((CostType::ResourceName, bill.resource_name.clone()))
+                    .and_modify(|e| *e += bill.cost)
+                    .or_insert(bill.cost);
+
+                bill_details
+                    .entry((CostType::ResourceGroup, bill.resource_group.clone()))
+                    .and_modify(|e| *e += bill.cost)
+                    .or_insert(bill.cost);
+
+                bill_details
+                    .entry((CostType::Subscription, bill.subscription_name.clone()))
+                    .and_modify(|e| *e += bill.cost)
+                    .or_insert(bill.cost);
+
+                bill_details
+                    .entry((CostType::MeterCategory, bill.meter_category.clone()))
+                    .and_modify(|e| *e += bill.cost)
+                    .or_insert(bill.cost);
+
+                res_details.insert(format!(
+                    "{}___{}",
+                    bill.resource_group.clone(),
+                    bill.resource_name.clone(),
+                ));
+                acc + bill.cost
+            } else {
+                acc
+            }
+        });
+
+        (bill, res_details, bill_details)
+    }
+
     pub fn cost_by_resource_group(
         &self,
         resource_group: &str,
@@ -143,6 +237,7 @@ impl Bills {
     }
 
     /// Similar to cost_by_resource_group, for cost_by_subscription
+    /// returns the total cost of all bills in the subscription and a set of all subscription names matched.
     pub fn cost_by_subscription(
         &self,
         subscription_name: &str,
@@ -194,6 +289,13 @@ impl Bills {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum CostType {
+    ResourceName,
+    ResourceGroup,
+    Subscription,
+    MeterCategory,
+}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,6 +4,8 @@ pub mod cmd_parse;
 pub mod find_files;
 use std::path::PathBuf;
 
+use serde::de;
+
 pub fn calc_resource_group_cost(resource_group: &str, file_or_folder: PathBuf) {
     println!("Hello, world!! Calculating Azure rg:{resource_group} cost from csv export.\n");
     let (latest_bill, _file_name) = load_latest_bill(file_or_folder);
@@ -20,7 +22,9 @@ pub fn calc_resource_group_cost(resource_group: &str, file_or_folder: PathBuf) {
 
 // function calc_subscription_cost
 pub fn calc_subscription_cost(subscription: &str, file_or_folder: PathBuf) {
-    println!("Hello, world!! Calculating Azure subscription:{subscription} cost from csv export.\n");
+    println!(
+        "Hello, world!! Calculating Azure subscription:{subscription} cost from csv export.\n"
+    );
     let (latest_bill, bill_file_name) = load_latest_bill(file_or_folder);
     println!();
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
@@ -44,7 +48,10 @@ fn load_latest_bill(file_or_folder: PathBuf) -> (bill::Bills, String) {
     }
     let latest_bill = bill::BillEntry::parse_csv(&file_bill)
         .expect(&format!("Error parsing the file '{:?}'", file_bill));
-    (latest_bill, file_bill.file_name().unwrap().to_str().unwrap().to_string())
+    (
+        latest_bill,
+        file_bill.file_name().unwrap().to_str().unwrap().to_string(),
+    )
 }
 
 pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: PathBuf) {
@@ -70,6 +77,118 @@ pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: PathBuf) {
         total_cost += disk_cost;
     }
     println!("    from file '{:?}'", file_name_bill);
+    println!("Total cost {cur} {total_cost:.2}");
+}
+
+pub fn cost_by_resource_name_regex(name_regex: &str, file_or_folder: PathBuf) {
+    println!("Hello, world!! Calculating Azure cost from csv export regex {name_regex}.\n");
+    let (latest_bill, _file_name) = load_latest_bill(file_or_folder);
+    println!();
+    // now that we have latest_bill and disks, lookup disk cost in latest_bill
+    // and print the cost
+    let cur = latest_bill.get_billing_currency();
+    let mut total_cost: f64 = 0.0;
+    let (item_cost, details) = latest_bill.cost_by_resource_name_regex(name_regex);
+    println!("cost {cur} {item_cost:7.2} - regex:'{name_regex:?}' ");
+    total_cost += item_cost;
+    if details.len() < 4 {
+        println!(" details: {:?}", details);
+    } else {
+        println!(" details: len={}", details.len());
+        for d in details.iter() {
+            println!(" details: {:?}", d);
+        }
+    }
+    println!("Total cost {cur} {total_cost:.2}");
+}
+
+pub fn cost_by_any(
+    name_r: Option<String>,
+    rg_r: Option<String>,
+    sub_r: Option<String>,
+    cat_r: Option<String>,
+    file_or_folder: PathBuf,
+) {
+    println!("Calc Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}.\n");
+    let (latest_bill, _file_name) = load_latest_bill(file_or_folder);
+    println!();
+    // now that we have latest_bill and disks, lookup disk cost in latest_bill
+    // and print the cost
+    let cur = latest_bill.get_billing_currency();
+    let s_name = name_r.unwrap_or("".to_string());
+    let s_rg = rg_r.unwrap_or("".to_string());
+    let s_sub = sub_r.unwrap_or("".to_string());
+    let s_cat = cat_r.unwrap_or("".to_string());
+
+    let (total_cost, details, bill_details) =
+        latest_bill.cost_by_any(&s_name, &s_rg, &s_sub, &s_cat);
+    // if details.len() < 4 {
+    //     println!(" details: {:?}", details);
+    // } else {
+    //     println!(" details: len={}", details.len());
+    //     for d in details.iter() {
+    //         println!(" details: {:?}", d);
+    //     }
+    // }
+
+    // print Subscription bill details
+    let mut total_sub = 0.0;
+    let mut cnt_sub = 0;
+    bill_details.iter().for_each(|((grp, name), cost)| {
+        if *grp == bill::CostType::Subscription {
+            println!(" bill_details: '{grp:?}' :: '{cur} {cost:.2}' :: '{name}'");
+            total_sub += cost;
+            cnt_sub += 1;
+        }
+    });
+    if cnt_sub > 0 {
+        println!("     Total #{cnt_sub} subscriptions cost {cur} {total_sub:.2}");
+    }
+    // print ResourceGroup bill details
+    if s_rg.len() > 0 {
+        let mut total_rg = 0.0;
+        let mut cnt_rg = 0;
+        bill_details.iter().for_each(|((grp, name), cost)| {
+            if *grp == bill::CostType::ResourceGroup {
+                println!(" bill_details: '{grp:?}' :: '{cur} {cost:.2}' :: '{name}'");
+                total_rg += cost;
+                cnt_rg += 1;
+            }
+        });
+        if cnt_rg > 0 {
+            println!("     Total #{cnt_rg} resource groups cost {cur} {total_rg:.2}");
+        }
+    }
+    // print Resource bill details
+    if s_name.len() > 0 {
+        let mut total_res = 0.0;
+        let mut cnt_res = 0;
+        bill_details.iter().for_each(|((grp, name), cost)| {
+            if *grp == bill::CostType::ResourceName {
+                println!(" bill_details: '{grp:?}' :: '{cur} {cost:.2}' :: '{name}'");
+                total_res += cost;
+                cnt_res += 1;
+            }
+        });
+        if cnt_res > 0 {
+            println!("     Total #{cnt_res} resources cost {cur} {total_res:.2}");
+        }
+    }
+    // print Category bill details
+    if s_cat.len() > 0 {
+        let mut total_cat = 0.0;
+        let mut cnt_cat = 0;
+        bill_details.iter().for_each(|((grp, name), cost)| {
+            if *grp == bill::CostType::MeterCategory {
+                println!(" bill_details: '{grp:?}' :: '{cur} {cost:.2}' :: '{name}'");
+                total_cat += cost;
+                cnt_cat += 1;
+            }
+        });
+        if cnt_cat > 0 {
+            println!("     Total #{cnt_cat} categories cost {cur} {total_cat:.2}");
+        }
+    }
     println!("Total cost {cur} {total_cost:.2}");
 }
 
