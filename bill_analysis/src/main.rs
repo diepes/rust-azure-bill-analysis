@@ -44,12 +44,28 @@ fn main() {
         None => {
             println!("No command specified #1 {:?}", app);
             println!("No command specified #2 {:?}", app.name_regex);
+
+            let (mut latest_bill, file_name) =
+                bill_analysis::load_bill(app.global_opts.bill_path.unwrap());
+            println!("Loaded latest bill from '{:?}'", file_name);
+            if let Some(bill_prev_subtract_path) = app.global_opts.bill_prev_subtract_path {
+                let (prev_bill, prev_file_name) = bill_analysis::load_bill(bill_prev_subtract_path);
+                if prev_bill.get_billing_currency() != latest_bill.get_billing_currency() {
+                    panic!("Currency mismatch between bills");
+                }
+                println!(
+                    "Removing previous bill from latest bill '{:?}'",
+                    prev_file_name
+                );
+                latest_bill.remove(prev_bill);
+            }
+
             bill_analysis::cost_by_any(
                 app.name_regex,
                 app.resource_group,
                 app.subscription,
                 app.meter_category,
-                app.global_opts.bill_path.unwrap(),
+                latest_bill,
             )
         }
     }

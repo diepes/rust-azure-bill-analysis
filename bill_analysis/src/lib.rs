@@ -4,8 +4,6 @@ pub mod cmd_parse;
 pub mod find_files;
 use std::path::PathBuf;
 
-use serde::de;
-
 pub fn calc_resource_group_cost(resource_group: &str, file_or_folder: PathBuf) {
     println!("Hello, world!! Calculating Azure rg:{resource_group} cost from csv export.\n");
     let (latest_bill, _file_name) = load_latest_bill(file_or_folder);
@@ -102,16 +100,19 @@ pub fn cost_by_resource_name_regex(name_regex: &str, file_or_folder: PathBuf) {
     println!("Total cost {cur} {total_cost:.2}");
 }
 
+pub fn load_bill(file_or_folder: PathBuf) -> (bill::Bills, String) {
+    let (latest_bill, file_name) = load_latest_bill(file_or_folder);
+    (latest_bill, file_name)
+}
 pub fn cost_by_any(
     name_r: Option<String>,
     rg_r: Option<String>,
     sub_r: Option<String>,
     cat_r: Option<String>,
-    file_or_folder: PathBuf,
+    // file_or_folder: PathBuf,
+    latest_bill: bill::Bills,
 ) {
     println!("Calc Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}.\n");
-    let (latest_bill, _file_name) = load_latest_bill(file_or_folder);
-    println!();
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
     // and print the cost
     let cur = latest_bill.get_billing_currency();
@@ -120,7 +121,7 @@ pub fn cost_by_any(
     let s_sub = sub_r.unwrap_or("".to_string());
     let s_cat = cat_r.unwrap_or("".to_string());
 
-    let (total_cost, details, bill_details) =
+    let (total_cost, _details, bill_details) =
         latest_bill.cost_by_any(&s_name, &s_rg, &s_sub, &s_cat);
     // if details.len() < 4 {
     //     println!(" details: {:?}", details);

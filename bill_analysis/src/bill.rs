@@ -1,8 +1,10 @@
 use csv::Reader;
 use regex::Regex;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
+use std::hash::Hash;
 use std::path::{Path, PathBuf};
 
 //struct to hold bill data for Azure detailed Enrollment csv parsed file
@@ -56,6 +58,42 @@ impl BillEntry {
         Ok(bills)
     }
 }
+// Implement Eq for BillEntry
+impl Eq for BillEntry {}
+impl PartialEq for BillEntry {
+    // Implement PartialEq for BillEntry by comparing some fields
+    fn eq(&self, other: &Self) -> bool {
+        self.subscription_id == other.subscription_id
+            && self.subscription_name == other.subscription_name
+            && self.product == other.product
+            && self.meter_id == other.meter_id
+            && self.meter_category == other.meter_category
+            && self.meter_sub_category == other.meter_sub_category
+            && self.meter_name == other.meter_name
+            // && self.quantity == other.quantity
+            // && self.billing_currency == other.billing_currency
+            && self.resource_id == other.resource_id
+            && self.resource_name == other.resource_name
+            && self.resource_group == other.resource_group
+    }
+}
+// Implement Hash for BillEntry
+impl Hash for BillEntry {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.subscription_id.hash(state);
+        self.subscription_name.hash(state);
+        self.product.hash(state);
+        self.meter_id.hash(state);
+        self.meter_category.hash(state);
+        self.meter_sub_category.hash(state);
+        self.meter_name.hash(state);
+        // self.quantity.hash(state);
+        // self.billing_currency.hash(state);
+        self.resource_id.hash(state);
+        self.resource_name.hash(state);
+        self.resource_group.hash(state);
+    }
+}
 
 pub struct Bills {
     bills: Vec<BillEntry>,
@@ -68,6 +106,13 @@ impl Bills {
             billing_currency: None,
         }
     }
+    pub fn remove(&mut self, other: Bills) {
+        // create HashMap from other.bills to use as lookup from self.bills
+        let b2: HashMap<&BillEntry, ()> = HashMap::from_iter(other.bills.iter().map(|b| (b, ())));
+        // retain only the bills that are not in other.bills(b2) using hash lookup
+        self.bills.retain(|x| !b2.contains_key(x));
+    }
+
     pub fn total_no_reservation(&self) -> f64 {
         self.bills
             .iter()

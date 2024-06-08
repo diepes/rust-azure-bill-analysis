@@ -25,6 +25,10 @@ Rust tool to summarize Detailed Azure bill
        cargo run -- --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv resource-price --subscription ".*7.*Non-Prod"
        # No command
        cargo run --  --subscription "Torpedo7" --bill_path --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv
+       # Find AKS RG's cost breakdown
+       cargo run -- --bill-path ./csv_data/Detail_Enrollment_70785102_202404_en.csv --resource-group="^MC"
+       # Remove all previous month entries - only view new
+       cargo run -- --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv --bill-prev-subtract-path ./csv_data/Detail_Enrollment_70785102_202404_en.csv --resource-group ".*"
 
 * RG summary
 
