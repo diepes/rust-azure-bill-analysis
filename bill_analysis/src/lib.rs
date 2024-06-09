@@ -121,16 +121,15 @@ pub fn cost_by_any(
     let s_sub = sub_r.unwrap_or("".to_string());
     let s_cat = cat_r.unwrap_or("".to_string());
 
-    let (total_cost, _details, bill_details) =
+    let (total_cost, details, bill_details) =
         latest_bill.cost_by_any(&s_name, &s_rg, &s_sub, &s_cat);
-    // if details.len() < 4 {
-    //     println!(" details: {:?}", details);
-    // } else {
-    //     println!(" details: len={}", details.len());
-    //     for d in details.iter() {
-    //         println!(" details: {:?}", d);
-    //     }
-    // }
+
+    if s_name.len() > 0 {
+        println!(" details: len={}", details.len());
+        for d in details.iter() {
+            println!(" details: {:?}", d);
+        }
+    }
 
     // print Subscription bill details
     let mut total_sub = 0.0;

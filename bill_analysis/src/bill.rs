@@ -64,16 +64,17 @@ impl PartialEq for BillEntry {
     // Implement PartialEq for BillEntry by comparing some fields
     fn eq(&self, other: &Self) -> bool {
         self.subscription_id == other.subscription_id
-            && self.subscription_name == other.subscription_name
-            && self.product == other.product
-            && self.meter_id == other.meter_id
-            && self.meter_category == other.meter_category
-            && self.meter_sub_category == other.meter_sub_category
-            && self.meter_name == other.meter_name
+            // && self.subscription_name == other.subscription_name
+            // && self.product == other.product
+            // meter settings changed 2024-05 
+            // && self.meter_id == other.meter_id
+            // && self.meter_category == other.meter_category
+            // && self.meter_sub_category == other.meter_sub_category
+            // && self.meter_name == other.meter_name
             // && self.quantity == other.quantity
             // && self.billing_currency == other.billing_currency
             && self.resource_id == other.resource_id
-            && self.resource_name == other.resource_name
+            // && self.resource_name == other.resource_name
             && self.resource_group == other.resource_group
     }
 }
@@ -81,17 +82,17 @@ impl PartialEq for BillEntry {
 impl Hash for BillEntry {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.subscription_id.hash(state);
-        self.subscription_name.hash(state);
-        self.product.hash(state);
-        self.meter_id.hash(state);
-        self.meter_category.hash(state);
-        self.meter_sub_category.hash(state);
-        self.meter_name.hash(state);
+        // self.subscription_name.hash(state);
+        // self.product.hash(state);
+        // self.meter_id.hash(state);
+        // self.meter_category.hash(state);
+        // self.meter_sub_category.hash(state);
+        // self.meter_name.hash(state);
         // self.quantity.hash(state);
         // self.billing_currency.hash(state);
         self.resource_id.hash(state);
-        self.resource_name.hash(state);
-        self.resource_group.hash(state);
+        // self.resource_name.hash(state);
+        // self.resource_group.hash(state);
     }
 }
 
