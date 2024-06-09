@@ -72,4 +72,6 @@ pub struct GlobalOpts {
     pub bill_path: Option<PathBuf>,
     #[arg(long, default_value = None)]
     pub bill_prev_subtract_path: Option<PathBuf>,
+    #[arg(short, long, default_value = "10.00")]
+    pub cost_min_display: f64,
 }

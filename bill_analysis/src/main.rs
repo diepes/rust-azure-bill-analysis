@@ -66,6 +66,7 @@ fn main() {
                 app.subscription,
                 app.meter_category,
                 latest_bill,
+                app.global_opts.cost_min_display,
             )
         }
     }

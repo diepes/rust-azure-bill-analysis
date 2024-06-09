@@ -111,6 +111,7 @@ pub fn cost_by_any(
     cat_r: Option<String>,
     // file_or_folder: PathBuf,
     latest_bill: bill::Bills,
+    cost_min_display: f64,
 ) {
     println!("Calc Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}.\n");
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
@@ -131,65 +132,76 @@ pub fn cost_by_any(
         }
     }
 
-    // print Subscription bill details
-    let mut total_sub = 0.0;
-    let mut cnt_sub = 0;
-    bill_details.iter().for_each(|((grp, name), cost)| {
-        if *grp == bill::CostType::Subscription {
-            println!(" bill_details: '{grp:?}' :: '{cur} {cost:.2}' :: '{name}'");
-            total_sub += cost;
-            cnt_sub += 1;
-        }
-    });
-    if cnt_sub > 0 {
-        println!("     Total #{cnt_sub} subscriptions cost {cur} {total_sub:.2}");
-    }
+    print_summary(
+        &bill_details,
+        &cur,
+        bill::CostType::Subscription,
+        cost_min_display,
+    );
     // print ResourceGroup bill details
-    if s_rg.len() > 0 {
-        let mut total_rg = 0.0;
-        let mut cnt_rg = 0;
-        bill_details.iter().for_each(|((grp, name), cost)| {
-            if *grp == bill::CostType::ResourceGroup {
-                println!(" bill_details: '{grp:?}' :: '{cur} {cost:.2}' :: '{name}'");
-                total_rg += cost;
-                cnt_rg += 1;
-            }
-        });
-        if cnt_rg > 0 {
-            println!("     Total #{cnt_rg} resource groups cost {cur} {total_rg:.2}");
-        }
-    }
+    print_summary(
+        &bill_details,
+        &cur,
+        bill::CostType::ResourceGroup,
+        cost_min_display,
+    );
     // print Resource bill details
     if s_name.len() > 0 {
-        let mut total_res = 0.0;
-        let mut cnt_res = 0;
-        bill_details.iter().for_each(|((grp, name), cost)| {
-            if *grp == bill::CostType::ResourceName {
-                println!(" bill_details: '{grp:?}' :: '{cur} {cost:.2}' :: '{name}'");
-                total_res += cost;
-                cnt_res += 1;
-            }
-        });
-        if cnt_res > 0 {
-            println!("     Total #{cnt_res} resources cost {cur} {total_res:.2}");
-        }
+        print_summary(
+            &bill_details,
+            &cur,
+            bill::CostType::ResourceName,
+            cost_min_display,
+        );
     }
+
     // print Category bill details
     if s_cat.len() > 0 {
-        let mut total_cat = 0.0;
-        let mut cnt_cat = 0;
-        bill_details.iter().for_each(|((grp, name), cost)| {
-            if *grp == bill::CostType::MeterCategory {
-                println!(" bill_details: '{grp:?}' :: '{cur} {cost:.2}' :: '{name}'");
-                total_cat += cost;
-                cnt_cat += 1;
-            }
-        });
-        if cnt_cat > 0 {
-            println!("     Total #{cnt_cat} categories cost {cur} {total_cat:.2}");
-        }
+        print_summary(
+            &bill_details,
+            &cur,
+            bill::CostType::MeterCategory,
+            cost_min_display,
+        );
     }
+
     println!("Total cost {cur} {total_cost:.2}");
+}
+
+/// print_summary for Subscription, ResourceGroup, ResourceName, MeterCategory
+fn print_summary(
+    bill_details: &std::collections::HashMap<(bill::CostType, String), f64>,
+    cur: &str,
+    cost_type: bill::CostType,
+    cost_min_display: f64,
+) {
+    let mut total = 0.0;
+    let mut cnt = 0;
+    let mut bill_details_sorted: Vec<(f64, &str)> = bill_details
+        .iter()
+        .filter_map(|((grp, name), cost)| {
+            total += cost;
+            cnt += 1;
+            if *grp == cost_type && *cost > cost_min_display {
+                Some((*cost, name.as_str()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    bill_details_sorted.sort_by(|(a, _na), (b, _nb)| a.partial_cmp(b).unwrap());
+    for (cost, name) in bill_details_sorted.iter() {
+        println!(
+            " bill_details: '{cur} {cost:7.2}' :: {t_short}:'{name}'",
+            t_short = cost_type.as_short()
+        );
+    }
+    if cnt > 0 {
+        println!("     Total #{cnt} {type} cost {cur} {total:.2}  (filtered cost < {cur} {cost_min:.2})",
+            type = cost_type.as_str(),cost_min = cost_min_display,
+            cur = cur, total = total,
+        );
+    }
 }
 
 pub fn calc_bill_summary(folder: PathBuf) {
