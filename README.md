@@ -20,7 +20,7 @@ Rust tool to summarize Detailed Azure bill
 * Get cost total for all subscriptions containing a '7'
 
        cd bill_analysis
-       cargo run -- --bill-path ./csv_data/Detail_Enrollment_70785102_202403_en.csv resource-price --subscription ".*7.*"
+       cargo run -- --subscription "Torpedo7" 
        cargo run -- --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv resource-price --subscription ".*7$" # Prod only
        cargo run -- --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv resource-price --subscription ".*7.*Non-Prod"
        # No command

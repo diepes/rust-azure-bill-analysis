@@ -106,7 +106,7 @@ pub fn load_bill(file_or_folder: PathBuf) -> (bill::Bills, String) {
 }
 
 pub fn display_total_cost_summary(bills: &bill::Bills, description: &str) {
-    println!("  Displaying Azure cost summary.  {description}\n");
+    println!("\n===  Displaying Azure cost summary.  {description} ===");
     let cur = bills.get_billing_currency();
     println!("Total cost {cur} {t_cost:.2}, no_reservation {cur} {t_no_reservation:.2}, Unused Savings {cur} {t_unused_savings:.2}, Used Savings {cur} {t_used_savings:.2}",
         t_cost = bills.total_effective(),

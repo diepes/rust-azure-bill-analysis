@@ -56,12 +56,12 @@ fn main() {
                     panic!("Currency mismatch between bills");
                 }
                 println!(
-                    "Removing previous bill from latest bill '{:?}'",
+                    "Removing previous bill from latest bill '{:?}' (Filter matching resource ID's)",
                     prev_file_name
                 );
                 bill_analysis::display_total_cost_summary(&prev_bill, "Previous bill");
                 latest_bill.remove(prev_bill);
-                bill_analysis::display_total_cost_summary(&latest_bill, "Latest bill - Previous bill");
+                bill_analysis::display_total_cost_summary(&latest_bill, "Latest bill - Previous bill (Id's matched)");
             }
             // Display latest_bill ( - previous bill if set)
             // using regex filters if set
