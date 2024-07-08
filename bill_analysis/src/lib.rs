@@ -104,7 +104,35 @@ pub fn load_bill(file_or_folder: PathBuf) -> (bill::Bills, String) {
     let (latest_bill, file_name) = load_latest_bill(file_or_folder);
     (latest_bill, file_name)
 }
-pub fn cost_by_any(
+
+pub fn display_total_cost_summary(bills: &bill::Bills, description: &str) {
+    println!("  Displaying Azure cost summary.  {description}\n");
+    let cur = bills.get_billing_currency();
+    println!("Total cost {cur} {t_cost:.2}, no_reservation {cur} {t_no_reservation:.2}, Unused Savings {cur} {t_unused_savings:.2}, Used Savings {cur} {t_used_savings:.2}",
+        t_cost = bills.total_effective(),
+        t_no_reservation = bills.total_no_reservation(),
+        t_unused_savings = bills.total_unused_savings(),
+        t_used_savings = bills.total_used_savings()
+    );
+    let category = "Virtual Machines";
+    println!(
+        "Savings '{category}' {cur} {savings:.2}",
+        category = category,
+        cur = cur,
+        savings = bills.savings(category)
+    );
+    let category = "Azure App Service";
+    println!(
+        "Savings '{category}' {cur} {savings:.2}",
+        category = category,
+        cur = cur,
+        savings = bills.savings(category)
+    );
+    println!();
+
+}
+/// Display cost summary.
+pub fn display_cost_by_filter(
     name_r: Option<String>,
     rg_r: Option<String>,
     sub_r: Option<String>,
@@ -113,7 +141,8 @@ pub fn cost_by_any(
     latest_bill: bill::Bills,
     cost_min_display: f64,
 ) {
-    println!("Calc Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}.\n");
+    println!();
+    println!("Filter Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}.\n");
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
     // and print the cost
     let cur = latest_bill.get_billing_currency();
@@ -132,13 +161,17 @@ pub fn cost_by_any(
         }
     }
 
+    // print Subscription bill details
+    println!("## Subscription bill details {}", s_sub);
     print_summary(
         &bill_details,
         &cur,
         bill::CostType::Subscription,
         cost_min_display,
     );
+    println!();
     // print ResourceGroup bill details
+    println!("## ResourceGroup bill details");
     print_summary(
         &bill_details,
         &cur,
@@ -177,28 +210,43 @@ fn print_summary(
 ) {
     let mut total = 0.0;
     let mut cnt = 0;
+    // create Vec from HashMap for specific CostType
     let mut bill_details_sorted: Vec<(f64, &str)> = bill_details
         .iter()
         .filter_map(|((grp, name), cost)| {
-            total += cost;
-            cnt += 1;
-            if *grp == cost_type && *cost > cost_min_display {
+            if *grp == cost_type {
+                total += cost;
+                cnt += 1;
+                //if *cost > cost_min_display {
                 Some((*cost, name.as_str()))
+                // }
             } else {
                 None
             }
         })
         .collect();
+    // sort Vec by cost
     bill_details_sorted.sort_by(|(a, _na), (b, _nb)| a.partial_cmp(b).unwrap());
+    let mut cnt_skip = 0;
     for (cost, name) in bill_details_sorted.iter() {
+        if *cost > cost_min_display {
+            println!(
+                " bill_details: '{cur} {cost:7.2}' :: {t_short}:'{name}'",
+                t_short = cost_type.as_short()
+            );
+        } else {
+            cnt_skip += 1;
+        }
+    }
+    if cnt_skip > 0 {
         println!(
-            " bill_details: '{cur} {cost:7.2}' :: {t_short}:'{name}'",
+            " bill_details: skipped {cnt_skip} with cost below < '{cur} {cost_min_display:.2}' Type::{t_short}",
             t_short = cost_type.as_short()
         );
     }
     if cnt > 0 {
-        println!("     Total #{cnt} {type} cost {cur} {total:.2}  (filtered cost < {cur} {cost_min:.2})",
-            type = cost_type.as_str(),cost_min = cost_min_display,
+        println!("     Total #{cnt} {cost_type} cost {cur} {total:.2}",
+            cost_type = cost_type.as_str(),
             cur = cur, total = total,
         );
     }

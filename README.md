@@ -4,7 +4,7 @@ Rust tool to summarize Detailed Azure bill
 
 ## Subcommands
 
-* in folder ./bill_analysis
+* in folder ./bill_analysis ( cd bill_analysis )
   * cargo run -- -h
 
 ### Command bill-summary
