@@ -9,7 +9,7 @@ fn main() {
     if app.global_opts.debug {
         println!("Debug mode activated {:?}", app.command);
     } else {
-        println!("Debug mode not activated {:?}", app.command);
+        //println!("Debug mode not activated {:?}", app.command);
     }
     match app.command {
         Some(Commands::BillSummary(args)) => {
@@ -19,19 +19,19 @@ fn main() {
         Some(Commands::ResourcePrice(args)) => {
             println!("Running '--resource-price' command with args: {:?}", args);
             if let Some(resource_group) = args.resource_group {
-                println!("Resource group: {:?}", resource_group);
+                println!("got Resource group: {:?}", resource_group);
                 bill_analysis::calc_resource_group_cost(
                     &resource_group,
                     app.global_opts.bill_path.unwrap(),
                 );
             } else if let Some(subscription) = args.subscription {
-                println!("Subscription: {:?}", subscription);
+                println!("got Subscription: {:?}", subscription);
                 bill_analysis::calc_subscription_cost(
                     &subscription,
                     app.global_opts.bill_path.unwrap(),
                 );
             } else if let Some(name_regex) = args.name_regex {
-                println!("Resource name: {:?}", name_regex);
+                println!("got Regex: {:?}", name_regex);
                 bill_analysis::cost_by_resource_name_regex(
                     &name_regex,
                     app.global_opts.bill_path.unwrap(),

@@ -5,7 +5,7 @@ pub mod find_files;
 use std::path::PathBuf;
 
 pub fn calc_resource_group_cost(resource_group: &str, file_or_folder: PathBuf) {
-    println!("Hello, world!! Calculating Azure rg:{resource_group} cost from csv export.\n");
+    println!("Calculating Azure rg:\"{resource_group}\" cost from csv export.\n");
     let (latest_bill, _file_name) = load_latest_bill(file_or_folder);
     println!();
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
@@ -21,7 +21,7 @@ pub fn calc_resource_group_cost(resource_group: &str, file_or_folder: PathBuf) {
 // function calc_subscription_cost
 pub fn calc_subscription_cost(subscription: &str, file_or_folder: PathBuf) {
     println!(
-        "Hello, world!! Calculating Azure subscription:{subscription} cost from csv export.\n"
+        "Calculating Azure subscription:\"{subscription}\" cost from csv export.\n"
     );
     let (latest_bill, bill_file_name) = load_latest_bill(file_or_folder);
     println!();
@@ -53,7 +53,7 @@ fn load_latest_bill(file_or_folder: PathBuf) -> (bill::Bills, String) {
 }
 
 pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: PathBuf) {
-    println!("Hello, world!! Calculating Azure disk cost from csv export.\n");
+    println!("Calculating Azure disk cost from csv export.\n");
     let disks = az_disk::AzDisks::parse(&file_disk)
         .expect(&format!("Error parsing the file '{:?}'", file_disk));
     let (latest_bill, file_name_bill) = load_latest_bill(file_or_folder);
@@ -79,7 +79,7 @@ pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: PathBuf) {
 }
 
 pub fn cost_by_resource_name_regex(name_regex: &str, file_or_folder: PathBuf) {
-    println!("Hello, world!! Calculating Azure cost from csv export regex {name_regex}.\n");
+    println!("Calculating Azure cost from csv export regex \"{name_regex}\".\n");
     let (latest_bill, _file_name) = load_latest_bill(file_or_folder);
     println!();
     // now that we have latest_bill and disks, lookup disk cost in latest_bill

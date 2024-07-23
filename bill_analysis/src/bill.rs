@@ -62,7 +62,7 @@ impl BillEntry {
             lines += 1;
         }
         bills.set_billing_currency()?;
-        println!("parse_csv {lines} lines in {:.3}", start.elapsed().as_secs_f64());
+        println!("parse_csv {lines} lines in {:.3}s", start.elapsed().as_secs_f64());
 
         Ok(bills)
     }

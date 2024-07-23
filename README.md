@@ -19,16 +19,17 @@ Rust tool to summarize Detailed Azure bill
 
 * Get cost total for all subscriptions containing a '7'
 
-       cd bill_analysis
-       cargo run -- --subscription "Torpedo7" 
-       cargo run -- --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv resource-price --subscription ".*7$" # Prod only
-       cargo run -- --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv resource-price --subscription ".*7.*Non-Prod"
+       cargo build --release --manifest-path bill_analysis/Cargo.toml
+       #
+       ./bill_analysis.rs --subscription "Torpedo7" 
+       ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv resource-price --subscription ".*7$" # Prod only
+       ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv resource-price --subscription ".*7.*Non-Prod"
        # No command
-       cargo run --  --subscription "Torpedo7" --bill_path --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv
+       ./bill_analysis.rs  --subscription "Torpedo7" --bill_path --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv
        # Find AKS RG's cost breakdown
-       cargo run -- --bill-path ./csv_data/Detail_Enrollment_70785102_202404_en.csv --resource-group="^MC"
+       ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202404_en.csv --resource-group="^MC"
        # Remove all previous month entries - only view new
-       cargo run -- --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv --bill-prev-subtract-path ./csv_data/Detail_Enrollment_70785102_202404_en.csv --resource-group ".*"
+       ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv --bill-prev-subtract-path ./csv_data/Detail_Enrollment_70785102_202404_en.csv --resource-group ".*"
 
 * RG summary
 
