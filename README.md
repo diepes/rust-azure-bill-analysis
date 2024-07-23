@@ -44,3 +44,8 @@ watch
 * Once cargo-watch is installed, you can run your project in watch mode with the following command:
 
       cargo watch -x run
+
+## Speedup mmap read
+
+* src/bill.rs replaced file read with mmap, no speedup
+  * when run with --release 6s drop to 0.6s even for normal file read.

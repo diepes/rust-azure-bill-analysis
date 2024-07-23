@@ -1,4 +1,3 @@
-use csv::Reader;
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -6,6 +5,9 @@ use std::error::Error;
 use std::fs::File;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
+
+// 1brc speedup
+use std::time::Instant;
 
 //struct to hold bill data for Azure detailed Enrollment csv parsed file
 #[derive(Debug, Deserialize)]
@@ -46,14 +48,21 @@ pub struct BillEntry {
 impl BillEntry {
     // Function to parse the CSV file and return a vector of BillEntry structs
     pub fn parse_csv(file_path: &PathBuf) -> Result<Bills, Box<dyn Error>> {
+        let start = Instant::now();
         let file = File::open(Path::new(file_path))?;
-        let mut reader = Reader::from_reader(file);
+        // 2024-06-23 tested mmap for faster read, no difference for 200k lines
+        //let mmap = unsafe { memmap::MmapOptions::new().map(&file).unwrap() };
+        //let mut reader = csv::Reader::from_reader(mmap.as_ref());
+        let mut reader = csv::Reader::from_reader(file);
         let mut bills = Bills::default();
+        let mut lines = 0;
         for result in reader.deserialize() {
             let bill: BillEntry = result?;
             bills.push(bill);
+            lines += 1;
         }
         bills.set_billing_currency()?;
+        println!("parse_csv {lines} lines in {:.3}", start.elapsed().as_secs_f64());
 
         Ok(bills)
     }
