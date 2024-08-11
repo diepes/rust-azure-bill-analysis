@@ -4,6 +4,7 @@ pub mod cmd_parse;
 pub mod find_files;
 use std::path::PathBuf;
 
+
 pub fn calc_resource_group_cost(resource_group: &str, file_or_folder: PathBuf) {
     println!("Calculating Azure rg:\"{resource_group}\" cost from csv export.\n");
     let (latest_bill, _file_name) = load_latest_bill(file_or_folder);
@@ -20,9 +21,7 @@ pub fn calc_resource_group_cost(resource_group: &str, file_or_folder: PathBuf) {
 
 // function calc_subscription_cost
 pub fn calc_subscription_cost(subscription: &str, file_or_folder: PathBuf) {
-    println!(
-        "Calculating Azure subscription:\"{subscription}\" cost from csv export.\n"
-    );
+    println!("Calculating Azure subscription:\"{subscription}\" cost from csv export.\n");
     let (latest_bill, bill_file_name) = load_latest_bill(file_or_folder);
     println!();
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
@@ -129,7 +128,6 @@ pub fn display_total_cost_summary(bills: &bill::Bills, description: &str) {
         savings = bills.savings(category)
     );
     println!();
-
 }
 /// Display cost summary.
 pub fn display_cost_by_filter(
@@ -245,9 +243,11 @@ fn print_summary(
         );
     }
     if cnt > 0 {
-        println!("     Total #{cnt} {cost_type} cost {cur} {total:.2}",
+        println!(
+            "     Total #{cnt} {cost_type} cost {cur} {total:.2}",
             cost_type = cost_type.as_str(),
-            cur = cur, total = total,
+            cur = cur,
+            total = total,
         );
     }
 }
