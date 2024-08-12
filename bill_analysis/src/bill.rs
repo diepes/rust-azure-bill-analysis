@@ -1,5 +1,6 @@
 use regex::Regex;
 use serde::Deserialize;
+use serde::Deserializer; // used for custom tags deserialization
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
@@ -43,6 +44,7 @@ pub struct BillEntry {
     benefit_id: String,
     #[serde(rename = "benefitName")]
     benefit_name: String,
+    tags: Tags,
 }
 
 impl BillEntry {
@@ -62,7 +64,10 @@ impl BillEntry {
             lines += 1;
         }
         bills.set_billing_currency()?;
-        println!("parse_csv {lines} lines in {:.3}s", start.elapsed().as_secs_f64());
+        println!(
+            "parse_csv {lines} lines in {:.3}s",
+            start.elapsed().as_secs_f64()
+        );
 
         Ok(bills)
     }
@@ -374,6 +379,41 @@ impl CostType {
         }
     }
 }
+
+// Tag data deserialized from the CSV file
+#[derive(Debug,)]
+pub struct Tags {
+    kv: HashMap<String,String>
+}
+
+// Implement Deserialize for Tags, Vec<Tag>
+impl<'de> Deserialize<'de> for Tags {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Deserialize the input into a string
+        // e.g. '"JenkinsManagedTag": "ManagedByAzureVMAgents","JenkinsTemplateTag": "build-agent-azure"'
+        let s = String::deserialize(deserializer)?;
+        
+        // Initialize a HashMap to hold the parsed tags
+        let mut kv = HashMap::new();
+
+        // Split the string by commas to separate each key-value pair
+        for part in s.split(',') {
+            // Split each pair by the colon to separate key and value
+            let mut iter = part.split(':');
+            if let (Some(key), Some(value)) = (iter.next(), iter.next()) {
+                // Trim quotes and whitespace and insert into the HashMap
+                kv.insert(key.trim_matches('"').trim().to_string(), value.trim_matches('"').trim().to_string());
+            }
+        }
+
+        // Return the Tags struct with the populated HashMap
+        Ok(Tags { kv })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
