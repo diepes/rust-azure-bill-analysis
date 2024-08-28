@@ -47,9 +47,26 @@ pub struct BillEntry {
     tags: Tags,
 }
 
+macro_rules! lowercase_all_strings {
+    ($struct:ident, $($field:ident),*) => {
+        impl $struct {
+            fn lowercase_all_strings(&mut self) {
+                $(
+                    self.$field = self.$field.to_lowercase();
+                )*
+            }
+        }
+    };
+}
+// Apply the macro to specify which fields are subject to lowercasing
+lowercase_all_strings!(BillEntry, subscription_name, resource_group, resource_name);
+
 impl BillEntry {
     // Function to parse the CSV file and return a vector of BillEntry structs
-    pub fn parse_csv(file_path: &PathBuf) -> Result<Bills, Box<dyn Error>> {
+    pub fn parse_csv(
+        file_path: &PathBuf,
+        global_opts: &crate::GlobalOpts,
+    ) -> Result<Bills, Box<dyn Error>> {
         let start = Instant::now();
         let file = File::open(Path::new(file_path))?;
         // 2024-06-23 tested mmap for faster read, no difference for 200k lines
@@ -59,7 +76,10 @@ impl BillEntry {
         let mut bills = Bills::default();
         let mut lines = 0;
         for result in reader.deserialize() {
-            let bill: BillEntry = result?;
+            let mut bill: BillEntry = result?;
+            if !global_opts.case_sensitive {
+                bill.lowercase_all_strings();
+            }
             bills.push(bill);
             lines += 1;
         }
@@ -220,6 +240,7 @@ impl Bills {
         rg_regex: &str,
         subs_regex: &str,
         meter_category: &str,
+        global_opts: &crate::GlobalOpts,
     ) -> (
         f64,
         std::collections::HashSet<String>,
@@ -381,9 +402,9 @@ impl CostType {
 }
 
 // Tag data deserialized from the CSV file
-#[derive(Debug,)]
+#[derive(Debug)]
 pub struct Tags {
-    kv: HashMap<String,String>
+    kv: HashMap<String, String>,
 }
 
 // Implement Deserialize for Tags, Vec<Tag>
@@ -395,7 +416,7 @@ impl<'de> Deserialize<'de> for Tags {
         // Deserialize the input into a string
         // e.g. '"JenkinsManagedTag": "ManagedByAzureVMAgents","JenkinsTemplateTag": "build-agent-azure"'
         let s = String::deserialize(deserializer)?;
-        
+
         // Initialize a HashMap to hold the parsed tags
         let mut kv = HashMap::new();
 
@@ -405,7 +426,10 @@ impl<'de> Deserialize<'de> for Tags {
             let mut iter = part.split(':');
             if let (Some(key), Some(value)) = (iter.next(), iter.next()) {
                 // Trim quotes and whitespace and insert into the HashMap
-                kv.insert(key.trim_matches('"').trim().to_string(), value.trim_matches('"').trim().to_string());
+                kv.insert(
+                    key.trim_matches('"').trim().to_string(),
+                    value.trim_matches('"').trim().to_string(),
+                );
             }
         }
 
@@ -416,12 +440,23 @@ impl<'de> Deserialize<'de> for Tags {
 
 #[cfg(test)]
 mod tests {
+    use crate::cmd_parse::GlobalOpts;
+
     use super::*;
+
+    static  GlobalOpts: GlobalOpts = crate::GlobalOpts {
+            debug: false,
+            bill_path: None,
+            bill_prev_subtract_path: None,
+            cost_min_display: 10.0,
+            case_sensitive: true,
+        };
 
     #[test]
     fn test_cost_by_resource_name() {
+        let global_opts = &GlobalOpts;
         let file_name: PathBuf = PathBuf::from("tests/azure_test_data_01.csv");
-        let result = BillEntry::parse_csv(&file_name);
+        let result = BillEntry::parse_csv(&file_name, &global_opts);
         // Assert that parsing was successful
         assert!(
             result.is_ok(),
@@ -437,12 +472,13 @@ mod tests {
     }
     #[test]
     fn test_parse_csv() {
+        let global_opts = &GlobalOpts;
         let file_name: PathBuf = PathBuf::from("tests/azure_test_data_01.csv");
         // Test file path
         let file_path = &file_name;
 
         // Parse the CSV file
-        let result = BillEntry::parse_csv(file_path);
+        let result = BillEntry::parse_csv(file_path, &global_opts);
 
         // Assert that parsing was successful
         assert!(
