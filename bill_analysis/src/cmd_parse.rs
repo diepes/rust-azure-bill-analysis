@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 /// Here's my app!
 #[derive(Debug, Parser)]
-#[clap(name = "my-app", version)]
+#[clap(name = "bill-analysis", version)]
 pub struct App {
     #[clap(flatten)]
     pub global_opts: GlobalOpts,
@@ -24,6 +24,9 @@ pub struct App {
     /// regex find to filter on meter category terminate with '$'
     #[arg(short, long)]
     pub meter_category: Option<String>,
+    /// regex find to filter on tag's terminate regex with '$'
+    #[arg(short, long)]
+    pub tag: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -74,4 +77,6 @@ pub struct GlobalOpts {
     pub bill_prev_subtract_path: Option<PathBuf>,
     #[arg(short, long, default_value = "10.00")]
     pub cost_min_display: f64,
+    #[arg(long, default_value = "false")]
+    pub case_sensitive: bool,
 }

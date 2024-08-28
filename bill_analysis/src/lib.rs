@@ -2,11 +2,17 @@ pub mod az_disk;
 pub mod bill;
 pub mod cmd_parse;
 pub mod find_files;
-use std::path::PathBuf;
+use std::{arch::global_asm, path::PathBuf};
 
-pub fn calc_resource_group_cost(resource_group: &str, file_or_folder: PathBuf) {
+use cmd_parse::GlobalOpts;
+
+pub fn calc_resource_group_cost(
+    resource_group: &str,
+    file_or_folder: &PathBuf,
+    global_opts: &GlobalOpts,
+) {
     println!("Calculating Azure rg:\"{resource_group}\" cost from csv export.\n");
-    let (latest_bill, _file_name) = load_latest_bill(file_or_folder);
+    let (latest_bill, _file_name) = load_latest_bill(&file_or_folder, &global_opts);
     println!();
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
     // and print the cost
@@ -19,11 +25,13 @@ pub fn calc_resource_group_cost(resource_group: &str, file_or_folder: PathBuf) {
 }
 
 // function calc_subscription_cost
-pub fn calc_subscription_cost(subscription: &str, file_or_folder: PathBuf) {
-    println!(
-        "Calculating Azure subscription:\"{subscription}\" cost from csv export.\n"
-    );
-    let (latest_bill, bill_file_name) = load_latest_bill(file_or_folder);
+pub fn calc_subscription_cost(
+    subscription: &str,
+    file_or_folder: &PathBuf,
+    global_opts: &GlobalOpts,
+) {
+    println!("Calculating Azure subscription:\"{subscription}\" cost from csv export.\n");
+    let (latest_bill, bill_file_name) = load_latest_bill(&file_or_folder, &global_opts);
     println!();
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
     // and print the cost
@@ -36,15 +44,15 @@ pub fn calc_subscription_cost(subscription: &str, file_or_folder: PathBuf) {
     println!("Total cost {cur} {total_cost:.2} subs:{:?}", subs);
 }
 
-fn load_latest_bill(file_or_folder: PathBuf) -> (bill::Bills, String) {
+fn load_latest_bill(file_or_folder: &PathBuf, global_opts: &GlobalOpts) -> (bill::Bills, String) {
     let file_bill: PathBuf;
     if file_or_folder.is_file() {
-        file_bill = file_or_folder;
+        file_bill = file_or_folder.clone();
     } else {
         let files = find_files::in_folder(&file_or_folder, r"Detail_Enrollment_70785102_.*_en.csv");
         file_bill = file_or_folder.join(files.last().unwrap());
     }
-    let latest_bill = bill::BillEntry::parse_csv(&file_bill)
+    let latest_bill = bill::BillEntry::parse_csv(&file_bill, &global_opts)
         .expect(&format!("Error parsing the file '{:?}'", file_bill));
     (
         latest_bill,
@@ -52,11 +60,11 @@ fn load_latest_bill(file_or_folder: PathBuf) -> (bill::Bills, String) {
     )
 }
 
-pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: PathBuf) {
+pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: PathBuf, global_opts: &GlobalOpts) {
     println!("Calculating Azure disk cost from csv export.\n");
     let disks = az_disk::AzDisks::parse(&file_disk)
         .expect(&format!("Error parsing the file '{:?}'", file_disk));
-    let (latest_bill, file_name_bill) = load_latest_bill(file_or_folder);
+    let (latest_bill, file_name_bill) = load_latest_bill(&file_or_folder, &global_opts);
     println!();
     println!(
         "Read {len_disk:?} records from '{f_disk}' and {len_bill:?} records from '{f_bill}'",
@@ -78,9 +86,13 @@ pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: PathBuf) {
     println!("Total cost {cur} {total_cost:.2}");
 }
 
-pub fn cost_by_resource_name_regex(name_regex: &str, file_or_folder: PathBuf) {
+pub fn cost_by_resource_name_regex(
+    name_regex: &str,
+    file_or_folder: &PathBuf,
+    global_opts: &GlobalOpts,
+) {
     println!("Calculating Azure cost from csv export regex \"{name_regex}\".\n");
-    let (latest_bill, _file_name) = load_latest_bill(file_or_folder);
+    let (latest_bill, _file_name) = load_latest_bill(&file_or_folder, &global_opts);
     println!();
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
     // and print the cost
@@ -100,12 +112,16 @@ pub fn cost_by_resource_name_regex(name_regex: &str, file_or_folder: PathBuf) {
     println!("Total cost {cur} {total_cost:.2}");
 }
 
-pub fn load_bill(file_or_folder: PathBuf) -> (bill::Bills, String) {
-    let (latest_bill, file_name) = load_latest_bill(file_or_folder);
+pub fn load_bill(file_or_folder: &PathBuf, global_opts: &GlobalOpts) -> (bill::Bills, String) {
+    let (latest_bill, file_name) = load_latest_bill(&file_or_folder, &global_opts);
     (latest_bill, file_name)
 }
 
-pub fn display_total_cost_summary(bills: &bill::Bills, description: &str) {
+pub fn display_total_cost_summary(
+    bills: &bill::Bills,
+    description: &str,
+    global_opts: &GlobalOpts,
+) {
     println!("\n===  Displaying Azure cost summary.  {description} ===");
     let cur = bills.get_billing_currency();
     println!("Total cost {cur} {t_cost:.2}, no_reservation {cur} {t_no_reservation:.2}, Unused Savings {cur} {t_unused_savings:.2}, Used Savings {cur} {t_used_savings:.2}",
@@ -129,7 +145,6 @@ pub fn display_total_cost_summary(bills: &bill::Bills, description: &str) {
         savings = bills.savings(category)
     );
     println!();
-
 }
 /// Display cost summary.
 pub fn display_cost_by_filter(
@@ -139,7 +154,8 @@ pub fn display_cost_by_filter(
     cat_r: Option<String>,
     // file_or_folder: PathBuf,
     latest_bill: bill::Bills,
-    cost_min_display: f64,
+    // global_opts.case_sensitive: bool,
+    global_opts: &GlobalOpts,
 ) {
     println!();
     println!("Filter Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}.\n");
@@ -152,7 +168,7 @@ pub fn display_cost_by_filter(
     let s_cat = cat_r.unwrap_or("".to_string());
 
     let (total_cost, details, bill_details) =
-        latest_bill.cost_by_any(&s_name, &s_rg, &s_sub, &s_cat);
+        latest_bill.cost_by_any(&s_name, &s_rg, &s_sub, &s_cat, &global_opts);
 
     if s_name.len() > 0 {
         println!(" details: len={}", details.len());
@@ -167,7 +183,7 @@ pub fn display_cost_by_filter(
         &bill_details,
         &cur,
         bill::CostType::Subscription,
-        cost_min_display,
+        global_opts,
     );
     println!();
     // print ResourceGroup bill details
@@ -176,7 +192,7 @@ pub fn display_cost_by_filter(
         &bill_details,
         &cur,
         bill::CostType::ResourceGroup,
-        cost_min_display,
+        global_opts,
     );
     // print Resource bill details
     if s_name.len() > 0 {
@@ -184,7 +200,7 @@ pub fn display_cost_by_filter(
             &bill_details,
             &cur,
             bill::CostType::ResourceName,
-            cost_min_display,
+            global_opts,
         );
     }
 
@@ -194,7 +210,7 @@ pub fn display_cost_by_filter(
             &bill_details,
             &cur,
             bill::CostType::MeterCategory,
-            cost_min_display,
+            &global_opts,
         );
     }
 
@@ -206,7 +222,7 @@ fn print_summary(
     bill_details: &std::collections::HashMap<(bill::CostType, String), f64>,
     cur: &str,
     cost_type: bill::CostType,
-    cost_min_display: f64,
+    global_opts: &GlobalOpts,
 ) {
     let mut total = 0.0;
     let mut cnt = 0;
@@ -229,7 +245,7 @@ fn print_summary(
     bill_details_sorted.sort_by(|(a, _na), (b, _nb)| a.partial_cmp(b).unwrap());
     let mut cnt_skip = 0;
     for (cost, name) in bill_details_sorted.iter() {
-        if *cost > cost_min_display {
+        if *cost > global_opts.cost_min_display {
             println!(
                 " bill_details: '{cur} {cost:7.2}' :: {t_short}:'{name}'",
                 t_short = cost_type.as_short()
@@ -241,18 +257,21 @@ fn print_summary(
     if cnt_skip > 0 {
         println!(
             " bill_details: skipped {cnt_skip} with cost below < '{cur} {cost_min_display:.2}' Type::{t_short}",
-            t_short = cost_type.as_short()
+            t_short = cost_type.as_short(),
+            cost_min_display = global_opts.cost_min_display,
         );
     }
     if cnt > 0 {
-        println!("     Total #{cnt} {cost_type} cost {cur} {total:.2}",
+        println!(
+            "     Total #{cnt} {cost_type} cost {cur} {total:.2}",
             cost_type = cost_type.as_str(),
-            cur = cur, total = total,
+            cur = cur,
+            total = total,
         );
     }
 }
 
-pub fn calc_bill_summary(folder: PathBuf) {
+pub fn calc_bill_summary(folder: &PathBuf, global_opts: &GlobalOpts) {
     println!("Hello, world!! Calculating Azure savings form Amortized charges csv export.\n");
     //let folder = app.global_opts.billpath.unwrap();
     let files = find_files::in_folder(&folder, r"Detail_Enrollment_70785102_.*_en.csv");
@@ -261,7 +280,7 @@ pub fn calc_bill_summary(folder: PathBuf) {
         // combine folder and csv_file_name into file_path
         //let file_path = format!("{:?}/{}", folder, csv_file_name);
         let file_path = folder.join(csv_file_name);
-        let bills = bill::BillEntry::parse_csv(&file_path)
+        let bills = bill::BillEntry::parse_csv(&file_path, &global_opts)
             .expect(&format!("Error parsing the file '{:?}'", file_path));
         println!();
         println!(
