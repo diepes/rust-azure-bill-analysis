@@ -36,6 +36,7 @@ pub struct BillEntry {
     resource_name: String,
     resource_group: String,
     // PlanName,ChargeType,Frequency
+    publisher_name: String,
     plan_name: String,
     charge_type: String,
     frequency: String,
@@ -79,6 +80,15 @@ impl BillEntry {
             let mut bill: BillEntry = result?;
             if !global_opts.case_sensitive {
                 bill.lowercase_all_strings();
+            }
+            // handle empty RG - probably purchase
+            if bill.resource_group.is_empty() {
+                bill.resource_group = format!(
+                    "BUY_{}_{}_{}",
+                    bill.publisher_name.replace(" ", "-"),
+                    bill.plan_name.replace(" ", "-"),
+                    bill.charge_type
+                );
             }
             bills.push(bill);
             lines += 1;
@@ -444,13 +454,13 @@ mod tests {
 
     use super::*;
 
-    static  GlobalOpts: GlobalOpts = crate::GlobalOpts {
-            debug: false,
-            bill_path: None,
-            bill_prev_subtract_path: None,
-            cost_min_display: 10.0,
-            case_sensitive: true,
-        };
+    static GlobalOpts: GlobalOpts = crate::GlobalOpts {
+        debug: false,
+        bill_path: None,
+        bill_prev_subtract_path: None,
+        cost_min_display: 10.0,
+        case_sensitive: true,
+    };
 
     #[test]
     fn test_cost_by_resource_name() {
