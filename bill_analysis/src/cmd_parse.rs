@@ -24,9 +24,12 @@ pub struct App {
     /// regex find to filter on meter category terminate with '$'
     #[arg(short, long)]
     pub meter_category: Option<String>,
-    /// regex find to filter on tag's terminate regex with '$'
+    /// tag to display summary of.
     #[arg(short, long)]
-    pub tag: Option<String>,
+    pub tag_summarize: Option<String>,
+    /// regex find to filter on tag's terminate regex with '$'
+    #[arg(long)]
+    pub tag_filter: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]

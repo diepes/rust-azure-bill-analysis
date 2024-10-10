@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 // 1brc speedup
 use std::time::Instant;
+mod tags;
+pub mod calc;
 
 //struct to hold bill data for Azure detailed Enrollment csv parsed file
 #[derive(Debug, Deserialize)]
@@ -45,7 +47,7 @@ pub struct BillEntry {
     benefit_id: String,
     #[serde(rename = "benefitName")]
     benefit_name: String,
-    tags: Tags,
+    tags: tags::Tags,
 }
 
 macro_rules! lowercase_all_strings {
@@ -239,7 +241,7 @@ impl Bills {
     }
 
     // function cost_by_any
-    // takes name_regex, rg_regex, subs_regex, meter_category and returns total where all match,
+    // takes name_regex, rg_regex, subs_regex, meter_category, tag_regex and returns total where all match,
     //   if empty str in input it is skiped for filter.
     // returns total_filtered_cost,
     //         set of filtered resource groups,
@@ -250,7 +252,9 @@ impl Bills {
         rg_regex: &str,
         subs_regex: &str,
         meter_category: &str,
-        global_opts: &crate::GlobalOpts,
+        tag_summarize: &str,
+        tag_filter: &str,
+        _global_opts: &crate::GlobalOpts,
     ) -> (
         f64,
         std::collections::HashSet<String>,
@@ -260,6 +264,7 @@ impl Bills {
         let re_rg = Regex::new(rg_regex).unwrap();
         let re_subs = Regex::new(subs_regex).unwrap();
         let re_type = Regex::new(meter_category).unwrap();
+        let re_tag = Regex::new(tag_filter).unwrap();
         // collect set of resource groups in set rgs
         let mut res_details = std::collections::HashSet::new();
         // filtered_bill_details record cost per filter category e.g. name_regex, rg_regex, subs_regex, meter_category
@@ -275,10 +280,13 @@ impl Bills {
                 flag_match = false;
             } else if !meter_category.is_empty() && !re_type.is_match(&bill.meter_category) {
                 flag_match = false;
+            // Check tags hashmap for match
+            } else if !tag_filter.is_empty() && !re_tag.is_match(&bill.tags.value) {
+                flag_match = false;
             }
             if flag_match {
                 // if all match
-                // record cost against resource_name, resource_group, subscription_name, meter_category
+                // record cost against resource_name, resource_group, subscription_name, meter_category, tag
                 filtered_bill_details
                     .entry((CostType::ResourceName, bill.resource_name.clone()))
                     .and_modify(|e| *e += bill.cost)
@@ -298,6 +306,23 @@ impl Bills {
                     .entry((CostType::MeterCategory, bill.meter_category.clone()))
                     .and_modify(|e| *e += bill.cost)
                     .or_insert(bill.cost);
+
+                // add filtered_bill_details for tags, using the matched tag and value
+                if !tag_summarize.is_empty() {
+                    if bill.tags.kv.contains_key(tag_summarize) {
+                        let v = bill.tags.kv.get(tag_summarize).unwrap();
+                        filtered_bill_details
+                            .entry((CostType::Tag, format!("tag:{}={}", tag_summarize, v)))
+                            .and_modify(|e| *e += bill.cost)
+                            .or_insert(bill.cost);
+                    } else {
+                        //no tag found
+                        filtered_bill_details
+                            .entry((CostType::Tag, format!("tag:none")))
+                            .and_modify(|e| *e += bill.cost)
+                            .or_insert(bill.cost);
+                    }
+                }
 
                 res_details.insert(format!(
                     "{rg}___{rn}",
@@ -390,6 +415,7 @@ pub enum CostType {
     ResourceGroup,
     Subscription,
     MeterCategory,
+    Tag,
 }
 impl CostType {
     pub fn as_str(&self) -> &str {
@@ -398,6 +424,7 @@ impl CostType {
             CostType::ResourceGroup => "ResourceGroup",
             CostType::Subscription => "Subscription",
             CostType::MeterCategory => "MeterCategory",
+            CostType::Tag => "Tag",
         }
     }
     // short name 3 char
@@ -407,46 +434,12 @@ impl CostType {
             CostType::ResourceGroup => "Rg",
             CostType::Subscription => "Sub",
             CostType::MeterCategory => "Meter",
+            CostType::Tag => "Tag",
         }
     }
 }
 
-// Tag data deserialized from the CSV file
-#[derive(Debug)]
-pub struct Tags {
-    kv: HashMap<String, String>,
-}
 
-// Implement Deserialize for Tags, Vec<Tag>
-impl<'de> Deserialize<'de> for Tags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        // Deserialize the input into a string
-        // e.g. '"JenkinsManagedTag": "ManagedByAzureVMAgents","JenkinsTemplateTag": "build-agent-azure"'
-        let s = String::deserialize(deserializer)?;
-
-        // Initialize a HashMap to hold the parsed tags
-        let mut kv = HashMap::new();
-
-        // Split the string by commas to separate each key-value pair
-        for part in s.split(',') {
-            // Split each pair by the colon to separate key and value
-            let mut iter = part.split(':');
-            if let (Some(key), Some(value)) = (iter.next(), iter.next()) {
-                // Trim quotes and whitespace and insert into the HashMap
-                kv.insert(
-                    key.trim_matches('"').trim().to_string(),
-                    value.trim_matches('"').trim().to_string(),
-                );
-            }
-        }
-
-        // Return the Tags struct with the populated HashMap
-        Ok(Tags { kv })
-    }
-}
 
 #[cfg(test)]
 mod tests {

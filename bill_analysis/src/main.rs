@@ -2,6 +2,7 @@
 // use bill_analysis::bill::{BillEntry, Bills};
 //use bill_analysis::cmd_parse::App;
 use bill_analysis::cmd_parse::Commands;
+use bill_analysis::bill as bill;
 use clap::Parser; // Add this line to import the `Parser` trait from the `clap` crate
 
 fn main() {
@@ -15,7 +16,8 @@ fn main() {
     match app.command {
         Some(Commands::BillSummary(args)) => {
             println!("Running BillSummary command {:?}", args);
-            bill_analysis::calc_bill_summary(&bill_path, &app.global_opts);
+            // bill_analysis::calc_bill_summary(&bill_path, &app.global_opts);
+            bill::calc::summary::summary(&bill_path, &app.global_opts);
         }
         Some(Commands::ResourcePrice(args)) => {
             println!("Running '--resource-price' command with args: {:?}", args);
@@ -89,6 +91,8 @@ fn main() {
                 app.resource_group,
                 app.subscription,
                 app.meter_category,
+                app.tag_summarize,
+                app.tag_filter,
                 latest_bill,
                 &app.global_opts,
             )
