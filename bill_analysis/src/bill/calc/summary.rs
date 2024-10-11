@@ -12,7 +12,7 @@ pub fn summary(folder: &PathBuf, global_opts: &GlobalOpts) {
         // combine folder and csv_file_name into file_path
         //let file_path = format!("{:?}/{}", folder, csv_file_name);
         let file_path = folder.join(csv_file_name);
-        let bills = bill::BillEntry::parse_csv(&file_path, &global_opts)
+        let bills = bill::billentry::BillEntry::parse_csv(&file_path, &global_opts)
             .expect(&format!("Error parsing the file '{:?}'", file_path));
         println!();
         println!(

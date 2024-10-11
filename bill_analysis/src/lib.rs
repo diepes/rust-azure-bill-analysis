@@ -1,5 +1,8 @@
 pub mod az_disk;
 pub mod bill;
+use bill::billentry::BillEntry;
+use bill::bills::Bills;
+use bill::costtype::CostType;
 pub mod cmd_parse;
 pub mod find_files;
 use std::path::PathBuf;
@@ -44,7 +47,7 @@ pub fn calc_subscription_cost(
     println!("Total cost {cur} {total_cost:.2} subs:{:?}", subs);
 }
 
-fn load_latest_bill(file_or_folder: &PathBuf, global_opts: &GlobalOpts) -> (bill::Bills, String) {
+fn load_latest_bill(file_or_folder: &PathBuf, global_opts: &GlobalOpts) -> (Bills, String) {
     let file_bill: PathBuf;
     if file_or_folder.is_file() {
         file_bill = file_or_folder.clone();
@@ -52,7 +55,7 @@ fn load_latest_bill(file_or_folder: &PathBuf, global_opts: &GlobalOpts) -> (bill
         let files = find_files::in_folder(&file_or_folder, r"Detail_Enrollment_70785102_.*_en.csv");
         file_bill = file_or_folder.join(files.last().unwrap());
     }
-    let latest_bill = bill::BillEntry::parse_csv(&file_bill, &global_opts)
+    let latest_bill = BillEntry::parse_csv(&file_bill, &global_opts)
         .expect(&format!("Error parsing the file '{:?}'", file_bill));
     (
         latest_bill,
@@ -112,13 +115,13 @@ pub fn cost_by_resource_name_regex(
     println!("Total cost {cur} {total_cost:.2}");
 }
 
-pub fn load_bill(file_or_folder: &PathBuf, global_opts: &GlobalOpts) -> (bill::Bills, String) {
+pub fn load_bill(file_or_folder: &PathBuf, global_opts: &GlobalOpts) -> (Bills, String) {
     let (latest_bill, file_name) = load_latest_bill(&file_or_folder, &global_opts);
     (latest_bill, file_name)
 }
 
 pub fn display_total_cost_summary(
-    bills: &bill::Bills,
+    bills: &Bills,
     description: &str,
     _global_opts: &GlobalOpts,
 ) {
@@ -156,7 +159,7 @@ pub fn display_cost_by_filter(
     tag_summarize: Option<String>,
     tag_filter: Option<String>,
     // file_or_folder: PathBuf,
-    latest_bill: bill::Bills,
+    latest_bill: Bills,
     // global_opts.case_sensitive: bool,
     global_opts: &GlobalOpts,
 ) {
@@ -194,7 +197,7 @@ pub fn display_cost_by_filter(
     print_summary(
         &bill_details,
         &cur,
-        bill::CostType::Subscription,
+        CostType::Subscription,
         global_opts,
     );
     println!();
@@ -203,7 +206,7 @@ pub fn display_cost_by_filter(
     print_summary(
         &bill_details,
         &cur,
-        bill::CostType::ResourceGroup,
+        CostType::ResourceGroup,
         global_opts,
     );
     println!();
@@ -212,7 +215,7 @@ pub fn display_cost_by_filter(
         print_summary(
             &bill_details,
             &cur,
-            bill::CostType::ResourceName,
+            CostType::ResourceName,
             global_opts,
         );
     }
@@ -222,7 +225,7 @@ pub fn display_cost_by_filter(
         print_summary(
             &bill_details,
             &cur,
-            bill::CostType::MeterCategory,
+            CostType::MeterCategory,
             &global_opts,
         );
         println!()
@@ -231,7 +234,7 @@ pub fn display_cost_by_filter(
     // print Tag bill details
     if s_tag_s.len() > 0 {
         println!("## Tag details");
-        print_summary(&bill_details, &cur, bill::CostType::Tag, &global_opts);
+        print_summary(&bill_details, &cur, CostType::Tag, &global_opts);
         println!();
     }
 
@@ -249,9 +252,9 @@ pub fn display_cost_by_filter(
 
 /// print_summary for Subscription, ResourceGroup, ResourceName, MeterCategory
 fn print_summary(
-    bill_details: &std::collections::HashMap<(bill::CostType, String), f64>,
+    bill_details: &std::collections::HashMap<(CostType, String), f64>,
     cur: &str,
-    cost_type: bill::CostType,
+    cost_type: CostType,
     global_opts: &GlobalOpts,
 ) {
     let mut total = 0.0;

@@ -7,10 +7,13 @@ use clap::Parser; // Add this line to import the `Parser` trait from the `clap` 
 
 fn main() {
     let app = bill_analysis::cmd_parse::App::parse();
+    let debug: bool;
     if app.global_opts.debug {
         println!("Debug mode activated {:?}", app.command);
+        debug = true;
     } else {
         //println!("Debug mode not activated {:?}", app.command);
+        debug = false;
     }
     let bill_path = app.global_opts.bill_path.clone().unwrap();
     match app.command {
@@ -48,8 +51,10 @@ fn main() {
             );
         }
         None => {
-            println!("No command specified #1 {:?}", app);
-            println!("No command specified #2 {:?}", app.name_regex);
+            if debug {
+                println!("No command specified #1 {:?}", app);
+                println!("No command specified #2 {:?}", app.name_regex);
+            }
             // Read latest_bill from file_name csv file.
             let (mut latest_bill, file_name) = bill_analysis::load_bill(
                 &app.global_opts.bill_path.clone().unwrap(),
