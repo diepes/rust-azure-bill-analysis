@@ -1,8 +1,8 @@
 // use bill_analysis::az_disk::{AzDisk, AzDisks};
 // use bill_analysis::bill::{BillEntry, Bills};
 //use bill_analysis::cmd_parse::App;
+use bill_analysis::bill;
 use bill_analysis::cmd_parse::Commands;
-use bill_analysis::bill as bill;
 use clap::Parser; // Add this line to import the `Parser` trait from the `clap` crate
 
 fn main() {

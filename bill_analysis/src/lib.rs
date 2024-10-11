@@ -236,6 +236,15 @@ pub fn display_cost_by_filter(
     }
 
     println!("Total cost {cur} {total_cost:.2}");
+
+    if global_opts.tag_list {
+        println!();
+        println!(
+            "Tags: {}\n{:?}",
+            latest_bill.tag_names.len(),
+            latest_bill.tag_names
+        );
+    }
 }
 
 /// print_summary for Subscription, ResourceGroup, ResourceName, MeterCategory
@@ -291,4 +300,3 @@ fn print_summary(
         );
     }
 }
-

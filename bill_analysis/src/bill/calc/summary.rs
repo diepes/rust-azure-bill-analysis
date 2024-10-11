@@ -1,9 +1,7 @@
-
-use std::path::PathBuf;
+use crate::bill;
 use crate::cmd_parse::GlobalOpts;
 use crate::find_files;
-use crate::bill;
-
+use std::path::PathBuf;
 
 pub fn summary(folder: &PathBuf, global_opts: &GlobalOpts) {
     println!("Hello, world!! Calculating Azure savings form Amortized charges csv export.\n");

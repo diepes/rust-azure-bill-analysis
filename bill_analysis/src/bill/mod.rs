@@ -1,7 +1,6 @@
 use regex::Regex;
 use serde::Deserialize;
-use serde::Deserializer; // used for custom tags deserialization
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fs::File;
 use std::hash::Hash;
@@ -9,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 // 1brc speedup
 use std::time::Instant;
-mod tags;
 pub mod calc;
+mod tags;
 
 //struct to hold bill data for Azure detailed Enrollment csv parsed file
 #[derive(Debug, Deserialize)]
@@ -92,6 +91,7 @@ impl BillEntry {
                     bill.charge_type
                 );
             }
+            bills.tag_names.extend(bill.tags.kv.keys().cloned());
             bills.push(bill);
             lines += 1;
         }
@@ -145,12 +145,14 @@ impl Hash for BillEntry {
 pub struct Bills {
     bills: Vec<BillEntry>,
     billing_currency: Option<String>,
+    pub tag_names: HashSet<String>,
 }
 impl Bills {
     fn default() -> Self {
         Self {
             bills: Vec::new(),
             billing_currency: None,
+            tag_names: HashSet::new(),
         }
     }
     pub fn remove(&mut self, other: Bills) {
@@ -309,10 +311,12 @@ impl Bills {
 
                 // add filtered_bill_details for tags, using the matched tag and value
                 if !tag_summarize.is_empty() {
-                    if bill.tags.kv.contains_key(tag_summarize) {
-                        let v = bill.tags.kv.get(tag_summarize).unwrap();
+                    let tag_summarize_lowercase = &tag_summarize.to_lowercase();
+                    if bill.tags.kv.contains_key(tag_summarize_lowercase) {
+                        // from lowercase tag_summarize get the value and original key(Original case)
+                        let v = bill.tags.kv.get(tag_summarize_lowercase).unwrap();
                         filtered_bill_details
-                            .entry((CostType::Tag, format!("tag:{}={}", tag_summarize, v)))
+                            .entry((CostType::Tag, format!("tag:{}={}", v.1, v.0)))
                             .and_modify(|e| *e += bill.cost)
                             .or_insert(bill.cost);
                     } else {
@@ -439,8 +443,6 @@ impl CostType {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use crate::cmd_parse::GlobalOpts;
@@ -453,6 +455,7 @@ mod tests {
         bill_prev_subtract_path: None,
         cost_min_display: 10.0,
         case_sensitive: true,
+        tag_list: false,
     };
 
     #[test]
