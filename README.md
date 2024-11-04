@@ -21,15 +21,18 @@ Rust tool to summarize Detailed Azure bill
 
        cargo build --release --manifest-path bill_analysis/Cargo.toml
        #
-       ./bill_analysis.rs --subscription "Torpedo7" 
+       cargo build --release -- --subscription "torpedo7" --bill-prev-subtract-path ./csv_data/*202409*.csv
+       #
        ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv resource-price --subscription ".*7$" # Prod only
+       #
        ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv resource-price --subscription ".*7.*Non-Prod"
        # No command
-       ./bill_analysis.rs  --subscription "Torpedo7" --bill_path --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv
+       ./bill_analysis.rs  --subscription "Torpedo7" --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv
        # Find AKS RG's cost breakdown
        ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202404_en.csv --resource-group="^MC"
        # Remove all previous month entries - only view new
        ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv --bill-prev-subtract-path ./csv_data/Detail_Enrollment_70785102_202404_en.csv --resource-group ".*"
+       #
 
 * RG summary
 
