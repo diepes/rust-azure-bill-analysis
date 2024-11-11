@@ -5,3 +5,4 @@ pub mod tags;
 pub mod billentry;
 pub mod costtype;
 pub mod bills;
+pub mod display;

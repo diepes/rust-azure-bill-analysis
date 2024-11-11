@@ -56,7 +56,7 @@ fn main() {
                 println!("No command specified #2 {:?}", app.name_regex);
             }
             // Read latest_bill from file_name csv file.
-            let (mut latest_bill, file_name) = bill_analysis::load_bill(
+            let (latest_bill, file_name) = bill_analysis::load_bill(
                 &app.global_opts.bill_path.clone().unwrap(),
                 &app.global_opts,
             );
@@ -67,6 +67,7 @@ fn main() {
                 &app.global_opts,
             );
             // If set read previous bill and subtract it from latest bill
+            let previous_bill: Option<bill::bills::Bills> =
             if let Some(ref bill_prev_subtract_path) = app.global_opts.bill_prev_subtract_path {
                 let (prev_bill, prev_file_name) =
                     bill_analysis::load_bill(bill_prev_subtract_path, &app.global_opts);
@@ -82,16 +83,19 @@ fn main() {
                     "Previous bill",
                     &app.global_opts,
                 );
-                latest_bill.remove(prev_bill);
-                bill_analysis::display_total_cost_summary(
-                    &latest_bill,
-                    "Latest bill - Previous bill (Id's matched)",
-                    &app.global_opts,
-                );
-            }
+                // latest_bill.remove(prev_bill);
+                // bill_analysis::display_total_cost_summary(
+                //     &latest_bill,
+                //     "Latest bill - Previous bill (Id's matched)",
+                //     &app.global_opts,
+                // );
+                Some(prev_bill)
+            } else {
+                None
+            };
             // Display latest_bill ( - previous bill if set)
             // using regex filters if set
-            bill_analysis::display_cost_by_filter(
+            bill_analysis::bill::display::display_cost_by_filter(
                 app.name_regex,
                 app.resource_group,
                 app.subscription,
@@ -99,6 +103,7 @@ fn main() {
                 app.tag_summarize,
                 app.tag_filter,
                 latest_bill,
+                previous_bill,
                 &app.global_opts,
             )
         }

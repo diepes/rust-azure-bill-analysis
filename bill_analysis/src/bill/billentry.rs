@@ -148,7 +148,7 @@ mod tests {
 
     use super::*;
 
-    static GlobalOpts: GlobalOpts = crate::GlobalOpts {
+    static GLOBAL_OPTS: GlobalOpts = crate::GlobalOpts {
         debug: false,
         bill_path: None,
         bill_prev_subtract_path: None,
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn test_cost_by_resource_name() {
-        let global_opts = &GlobalOpts;
+        let global_opts = &GLOBAL_OPTS;
         let file_name: PathBuf = PathBuf::from("tests/azure_test_data_01.csv");
         let result = BillEntry::parse_csv(&file_name, &global_opts);
         // Assert that parsing was successful
@@ -177,7 +177,7 @@ mod tests {
     }
     #[test]
     fn test_parse_csv() {
-        let global_opts = &GlobalOpts;
+        let global_opts = &GLOBAL_OPTS;
         let file_name: PathBuf = PathBuf::from("tests/azure_test_data_01.csv");
         // Test file path
         let file_path = &file_name;

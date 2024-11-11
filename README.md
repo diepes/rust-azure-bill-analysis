@@ -31,7 +31,7 @@ Rust tool to summarize Detailed Azure bill
        # Find AKS RG's cost breakdown
        ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202404_en.csv --resource-group="^MC"
        # Remove all previous month entries - only view new
-       ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv --bill-prev-subtract-path ./csv_data/Detail_Enrollment_70785102_202404_en.csv --resource-group ".*"
+       ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202410_en.csv --bill-prev-subtract-path ./csv_data/Detail_Enrollment_70785102_202409_en.csv --resource-group ".*"
        #
 
 * RG summary
