@@ -60,7 +60,9 @@ pub fn display_cost_by_filter(
         }
         // merge negative values from prev_details into details HashSet
         details.extend(prev_details);
-        //println!("DEBUG: 663.11 !!!!!:  {}",);
+        //
+        println!("!!!!! DEBUG: 663.11 !!!!!: Total:{} PrevT:{}",total_cost, prev_total_cost);
+        println!();
     }
 
     if s_name.len() > 0 {
@@ -128,21 +130,17 @@ pub fn display_cost_by_filter(
     }
 }
 
-
-/// print_summary for Subscription, ResourceGroup, ResourceName, MeterCategory
-fn print_summary(
-    bill_details: &std::collections::HashMap<(CostType, String), f64>,
-    cur: &str,
-    cost_type: CostType,
-    global_opts: &GlobalOpts,
-) {
+fn sort_calc_total<'a>(
+    bill_details: &'a std::collections::HashMap<(CostType, String), f64>,
+    cost_type: &CostType,
+) -> (f64, i32, Vec<(f64, &'a str)> ) {
     let mut total = 0.0;
     let mut cnt = 0;
     // create Vec from HashMap for specific CostType
     let mut bill_details_sorted: Vec<(f64, &str)> = bill_details
         .iter()
         .filter_map(|((grp, name), cost)| {
-            if *grp == cost_type {
+            if grp == cost_type {
                 total += cost;
                 cnt += 1;
                 // return some or none
@@ -154,6 +152,17 @@ fn print_summary(
         .collect();
     // sort Vec by cost
     bill_details_sorted.sort_by(|(a, _na), (b, _nb)| a.partial_cmp(b).unwrap());
+    (total, cnt, bill_details_sorted)
+}
+
+/// print_summary for Subscription, ResourceGroup, ResourceName, MeterCategory
+fn print_summary(
+    bill_details: &std::collections::HashMap<(CostType, String), f64>,
+    cur: &str,
+    cost_type: CostType,
+    global_opts: &GlobalOpts,
+) {
+    let (total, cnt, bill_details_sorted) = sort_calc_total(bill_details, &cost_type);
     let mut cnt_skip = 0;
     for (cost, name) in bill_details_sorted.iter() {
         if *cost > global_opts.cost_min_display || *cost < -global_opts.cost_min_display {
