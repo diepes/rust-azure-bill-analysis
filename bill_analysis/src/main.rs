@@ -67,8 +67,11 @@ fn main() {
                 &app.global_opts,
             );
             // If set read previous bill and subtract it from latest bill
-            let previous_bill: Option<bill::bills::Bills> =
-            if let Some(ref bill_prev_subtract_path) = app.global_opts.bill_prev_subtract_path {
+            let previous_bill: Option<bill::bills::Bills> = if let Some(
+                ref bill_prev_subtract_path,
+            ) =
+                app.global_opts.bill_prev_subtract_path
+            {
                 let (prev_bill, prev_file_name) =
                     bill_analysis::load_bill(bill_prev_subtract_path, &app.global_opts);
                 if prev_bill.get_billing_currency() != latest_bill.get_billing_currency() {

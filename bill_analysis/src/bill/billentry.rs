@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 // 1brc speedup
 use std::time::Instant;
 // pub mod calc;
-use crate::bill::tags::Tags;
 use crate::bill::bills::Bills;
+use crate::bill::tags::Tags;
 
 //struct to hold bill data for Azure detailed Enrollment csv parsed file
 #[derive(Debug, Deserialize)]
@@ -21,9 +21,9 @@ pub struct BillEntry {
     pub date: String,
     pub product: String,
     pub meter_id: String,
-    pub meter_category: String,  // e.g. "Virtual Network"
+    pub meter_category: String,     // e.g. "Virtual Network"
     pub meter_sub_category: String, // e.g. "Peering"
-    pub meter_name: String,  // e.g. "Intra-Region Ingress"
+    pub meter_name: String,         // e.g. "Intra-Region Ingress"
     pub quantity: f64,
     pub effective_price: f64,
     pub cost: f64,
@@ -140,7 +140,6 @@ impl Hash for BillEntry {
         // self.resource_group.hash(state);
     }
 }
-
 
 #[cfg(test)]
 mod tests {

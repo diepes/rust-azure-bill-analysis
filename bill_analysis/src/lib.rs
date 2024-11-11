@@ -119,11 +119,7 @@ pub fn load_bill(file_or_folder: &PathBuf, global_opts: &GlobalOpts) -> (Bills, 
     (latest_bill, file_name)
 }
 
-pub fn display_total_cost_summary(
-    bills: &Bills,
-    description: &str,
-    _global_opts: &GlobalOpts,
-) {
+pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts: &GlobalOpts) {
     println!("\n===  Displaying Azure cost summary.  {description} ===");
     let cur = bills.get_billing_currency();
     println!("Total cost {cur} {t_cost:.2}, no_reservation {cur} {t_no_reservation:.2}, Unused Savings {cur} {t_unused_savings:.2}, Used Savings {cur} {t_used_savings:.2}",
@@ -148,4 +144,3 @@ pub fn display_total_cost_summary(
     );
     println!();
 }
-

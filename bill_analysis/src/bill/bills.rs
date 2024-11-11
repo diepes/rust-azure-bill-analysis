@@ -1,9 +1,8 @@
+use crate::bill::billentry::BillEntry;
+use crate::bill::costtype::CostType;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use crate::bill::billentry::BillEntry;
-use crate::bill::costtype::CostType;
-
 
 pub struct Bills {
     pub bills: Vec<BillEntry>,
@@ -135,9 +134,9 @@ impl Bills {
         let re_tag = Regex::new(tag_filter).unwrap();
         // collect set of resource groups in set rgs
         let mut res_details = std::collections::HashSet::new();
-        // filtered_bill_details record cost per filter category e.g. name_regex, rg_regex, subs_regex, meter_category
-        let mut filtered_bill_details = std::collections::HashMap::new();
-
+        // bill_details record cost per filter category e.g. name_regex, rg_regex, subs_regex, meter_category
+        let mut bill_details: HashMap<(CostType, String), f64> = std::collections::HashMap::new();
+        // iter throuh bills, get total and update new bill_details for each category.
         let filtered_total = self.bills.iter().fold(0.0, |acc, bill| {
             let mut flag_match = true;
             if !name_regex.is_empty() && !re_name.is_match(&bill.resource_name) {
@@ -155,39 +154,39 @@ impl Bills {
             if flag_match {
                 // if all match
                 // record cost against resource_name, resource_group, subscription_name, meter_category, tag
-                filtered_bill_details
+                bill_details
                     .entry((CostType::ResourceName, bill.resource_name.clone()))
                     .and_modify(|e| *e += bill.cost)
                     .or_insert(bill.cost);
 
-                filtered_bill_details
+                bill_details
                     .entry((CostType::ResourceGroup, bill.resource_group.clone()))
                     .and_modify(|e| *e += bill.cost)
                     .or_insert(bill.cost);
 
-                filtered_bill_details
+                bill_details
                     .entry((CostType::Subscription, bill.subscription_name.clone()))
                     .and_modify(|e| *e += bill.cost)
                     .or_insert(bill.cost);
 
-                filtered_bill_details
+                bill_details
                     .entry((CostType::MeterCategory, bill.meter_category.clone()))
                     .and_modify(|e| *e += bill.cost)
                     .or_insert(bill.cost);
 
-                // add filtered_bill_details for tags, using the matched tag and value
+                // add bill_details for tags, using the matched tag and value
                 if !tag_summarize.is_empty() {
                     let tag_summarize_lowercase = &tag_summarize.to_lowercase();
                     if bill.tags.kv.contains_key(tag_summarize_lowercase) {
                         // from lowercase tag_summarize get the value and original key(Original case)
                         let v = bill.tags.kv.get(tag_summarize_lowercase).unwrap();
-                        filtered_bill_details
+                        bill_details
                             .entry((CostType::Tag, format!("tag:{}={}", v.1, v.0)))
                             .and_modify(|e| *e += bill.cost)
                             .or_insert(bill.cost);
                     } else {
                         //no tag found
-                        filtered_bill_details
+                        bill_details
                             .entry((CostType::Tag, format!("tag:none")))
                             .and_modify(|e| *e += bill.cost)
                             .or_insert(bill.cost);
@@ -204,8 +203,8 @@ impl Bills {
                 acc
             }
         });
-        // filtered_bill_details should have same cost total for each category
-        (filtered_total, res_details, filtered_bill_details)
+        // bill_details should have same cost total for each category
+        (filtered_total, res_details, bill_details)
     }
 
     pub fn cost_by_resource_group(
@@ -255,7 +254,6 @@ impl Bills {
     }
 
     pub fn push(&mut self, bill: BillEntry) {
-
         self.bills.push(bill);
     }
 

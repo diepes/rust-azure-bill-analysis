@@ -1,6 +1,6 @@
+use super::bills::Bills;
 use crate::bill::costtype::CostType;
 use crate::cmd_parse::GlobalOpts;
-use super::bills::Bills;
 
 /// Display cost summary.
 /// can also subtract previous_bill
@@ -30,7 +30,7 @@ pub fn display_cost_by_filter(
     let s_tag_s = tag_summarize.clone().unwrap_or("".to_string());
     let s_tag_r = tag_filter.unwrap_or("".to_string());
 
-    let (mut total_cost, mut details, mut bill_details) = latest_bill.cost_by_any(
+    let (bill_cost, mut details, mut bill_details) = latest_bill.cost_by_any(
         &s_name,
         &s_rg,
         &s_sub,
@@ -39,9 +39,10 @@ pub fn display_cost_by_filter(
         &s_tag_r,
         &global_opts,
     );
+    let mut total_cost = bill_cost;
     // If we got a previous bill calculate summary and subtract.
     if let Some(prev_bill) = previous_bill {
-        let (prev_total_cost, prev_details, prev_bill_details) = prev_bill.cost_by_any(
+        let (prev_bill_cost, prev_details, prev_bill_details) = prev_bill.cost_by_any(
             &s_name,
             &s_rg,
             &s_sub,
@@ -49,20 +50,15 @@ pub fn display_cost_by_filter(
             &s_tag_s,
             &s_tag_r,
             &global_opts,
-        ); 
-        // Total: NZD 29,398.00  RG:28734.89 SUB:29398.00
-        total_cost -= prev_total_cost;
-        // total_cost = 30061.12 - 29398.00; // RG > SUB  28734.89   29398.00
+        );
+        total_cost -= prev_bill_cost;
         // merge negative values from prev_bill_details into bill_details Hashmap
         // key (CostType, "resource_name")
-        for (key, value) in prev_bill_details {
-            *bill_details.entry(key).or_insert(-value) -= value;
+        for (key, value) in &prev_bill_details {
+            *bill_details.entry(key.clone()).or_insert(0.0) -= value;
         }
         // merge negative values from prev_details into details HashSet
         details.extend(prev_details);
-        //
-        println!("!!!!! DEBUG: 663.11 !!!!!: Total:{} PrevT:{}",total_cost, prev_total_cost);
-        println!();
     }
 
     if s_name.len() > 0 {
@@ -74,40 +70,20 @@ pub fn display_cost_by_filter(
 
     // print Subscription bill details
     println!("## Subscription bill details {}", s_sub);
-    print_summary(
-        &bill_details,
-        &cur,
-        CostType::Subscription,
-        global_opts,
-    );
+    print_summary(&bill_details, &cur, CostType::Subscription, global_opts);
     println!();
     // print ResourceGroup bill details
     println!("## ResourceGroup bill details");
-    print_summary(
-        &bill_details,
-        &cur,
-        CostType::ResourceGroup,
-        global_opts,
-    );
+    print_summary(&bill_details, &cur, CostType::ResourceGroup, global_opts);
     println!();
     // print Resource bill details
     if s_name.len() > 0 {
-        print_summary(
-            &bill_details,
-            &cur,
-            CostType::ResourceName,
-            global_opts,
-        );
+        print_summary(&bill_details, &cur, CostType::ResourceName, global_opts);
     }
 
     // print Category bill details
     if s_cat.len() > 0 {
-        print_summary(
-            &bill_details,
-            &cur,
-            CostType::MeterCategory,
-            &global_opts,
-        );
+        print_summary(&bill_details, &cur, CostType::MeterCategory, &global_opts);
         println!()
     }
 
@@ -133,7 +109,7 @@ pub fn display_cost_by_filter(
 fn sort_calc_total<'a>(
     bill_details: &'a std::collections::HashMap<(CostType, String), f64>,
     cost_type: &CostType,
-) -> (f64, i32, Vec<(f64, &'a str)> ) {
+) -> (f64, i32, Vec<(f64, &'a str)>) {
     let mut total = 0.0;
     let mut cnt = 0;
     // create Vec from HashMap for specific CostType
@@ -162,7 +138,7 @@ fn print_summary(
     cost_type: CostType,
     global_opts: &GlobalOpts,
 ) {
-    let (total, cnt, bill_details_sorted) = sort_calc_total(bill_details, &cost_type);
+    let (total, cnt, bill_details_sorted) = sort_calc_total(&bill_details, &cost_type);
     let mut cnt_skip = 0;
     for (cost, name) in bill_details_sorted.iter() {
         if *cost > global_opts.cost_min_display || *cost < -global_opts.cost_min_display {
@@ -190,4 +166,3 @@ fn print_summary(
         );
     }
 }
-

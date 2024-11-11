@@ -1,8 +1,8 @@
 // bill/mod.rs
 
-pub mod calc;
-pub mod tags;
 pub mod billentry;
-pub mod costtype;
 pub mod bills;
+pub mod calc;
+pub mod costtype;
 pub mod display;
+pub mod tags;

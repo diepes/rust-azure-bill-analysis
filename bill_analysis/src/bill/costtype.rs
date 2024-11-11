@@ -1,5 +1,4 @@
-
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum CostType {
     ResourceName,
     ResourceGroup,
