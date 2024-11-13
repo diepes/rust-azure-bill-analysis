@@ -51,8 +51,8 @@ fn load_latest_bill(file_or_folder: &PathBuf, global_opts: &GlobalOpts) -> (Bill
     if file_or_folder.is_file() {
         file_bill = file_or_folder.clone();
     } else {
-        let files = find_files::in_folder(&file_or_folder, r"Detail_Enrollment_70785102_.*_en.csv");
-        file_bill = file_or_folder.join(files.last().unwrap());
+        let (path,files) = find_files::in_folder(&file_or_folder, r"Detail_Enrollment_70785102_.*_en.csv");
+        file_bill = path.join(files.last().unwrap());
     }
     let latest_bill = BillEntry::parse_csv(&file_bill, &global_opts)
         .expect(&format!("Error parsing the file '{:?}'", file_bill));
