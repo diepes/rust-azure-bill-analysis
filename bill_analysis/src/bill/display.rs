@@ -15,6 +15,7 @@ pub fn display_cost_by_filter(
     rg_r: Option<String>,
     sub_r: Option<String>,
     cat_r: Option<String>,
+    region_r: Option<String>,
     tag_summarize: Option<String>,
     tag_filter: Option<String>,
     // file_or_folder: PathBuf,
@@ -24,7 +25,7 @@ pub fn display_cost_by_filter(
     global_opts: &GlobalOpts,
 ) {
     println!();
-    println!("Filter Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}, tag_r:{tag_filter:?}, tag_s:{tag_summarize:?}.\n");
+    println!("Filter Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}, tag_r:{tag_filter:?}, tag_s:{tag_summarize:?}, region_r:{region_r:?}.\n");
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
     // and print the cost
     let cur = latest_bill.get_billing_currency();
@@ -32,6 +33,7 @@ pub fn display_cost_by_filter(
     let s_rg = rg_r.unwrap_or("".to_string());
     let s_sub = sub_r.unwrap_or("".to_string());
     let s_cat = cat_r.unwrap_or("".to_string());
+    let s_region = region_r.unwrap_or("".to_string());
     let s_tag_s = tag_summarize.clone().unwrap_or("".to_string());
     let s_tag_r = tag_filter.unwrap_or("".to_string());
     let mut display_date = latest_bill.file_short_name.clone();
@@ -41,6 +43,7 @@ pub fn display_cost_by_filter(
         &s_rg,
         &s_sub,
         &s_cat,
+        &s_region,
         &s_tag_s,
         &s_tag_r,
         &global_opts,
@@ -58,6 +61,7 @@ pub fn display_cost_by_filter(
             &s_rg,
             &s_sub,
             &s_cat,
+            &s_region,
             &s_tag_s,
             &s_tag_r,
             &global_opts,

@@ -104,6 +104,7 @@ fn main() {
                 app.resource_group,
                 app.subscription,
                 app.meter_category,
+                app.resource_region,
                 app.tag_summarize,
                 app.tag_filter,
                 latest_bill,

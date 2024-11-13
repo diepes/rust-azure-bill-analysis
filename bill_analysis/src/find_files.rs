@@ -1,6 +1,6 @@
 use regex::Regex; // Add this line to import the `Regex` struct from the `regex` crate
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// split path and search folder for files matching the path.file_name() or if not present with file_re_pattern
 pub fn in_folder(path: &PathBuf, file_re_pattern: &str) -> (PathBuf,Vec<String>) {

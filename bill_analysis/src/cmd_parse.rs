@@ -30,6 +30,9 @@ pub struct App {
     /// regex find to filter on lowercase tag's
     #[arg(long)]
     pub tag_filter: Option<String>,
+    /// regex find to filter on resource_region terminate with '$' e.g. "Australia East"
+    #[arg(long)]
+    pub resource_region: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -62,6 +65,10 @@ pub struct ResourcePriceArgs {
     /// regex find to filter on subscriptions terminate with '$'
     #[arg(short, long)]
     pub subscription: Option<String>,
+    /// regex find to filter on resource_region terminate with '$'
+    #[arg(long)]
+    pub resource_region: Option<String>,
+    
 }
 #[derive(Debug, Args)]
 pub struct DiskCsvSavingsArgs {

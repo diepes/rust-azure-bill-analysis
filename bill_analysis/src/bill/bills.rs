@@ -126,6 +126,7 @@ impl Bills {
         rg_regex: &str,
         subs_regex: &str,
         meter_category: &str,
+        region_regex: &str,
         tag_summarize: &str,
         tag_filter: &str,
         _global_opts: &crate::GlobalOpts,
@@ -134,6 +135,7 @@ impl Bills {
         let re_rg = Regex::new(rg_regex).unwrap();
         let re_subs = Regex::new(subs_regex).unwrap();
         let re_type = Regex::new(meter_category).unwrap();
+        let re_region = Regex::new(region_regex).unwrap();
         let re_tag = Regex::new(tag_filter).unwrap();
         // collect set of resource groups in set rgs
         let mut summary_data = SummaryData::new();
@@ -152,6 +154,8 @@ impl Bills {
                 flag_match = false;
             // Check tags hashmap for match
             } else if !tag_filter.is_empty() && !re_tag.is_match(&bill.tags.value) {
+                flag_match = false;
+            } else if !region_regex.is_empty() && !re_region.is_match(&bill.meter_region) {
                 flag_match = false;
             }
             if flag_match {

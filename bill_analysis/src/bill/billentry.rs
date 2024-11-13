@@ -25,6 +25,7 @@ pub struct BillEntry {
     pub meter_category: String,     // e.g. "Virtual Network"
     pub meter_sub_category: String, // e.g. "Peering"
     pub meter_name: String,         // e.g. "Intra-Region Ingress"
+    pub meter_region: String,
     pub quantity: f64,
     pub effective_price: f64,
     pub cost: f64,
@@ -36,6 +37,7 @@ pub struct BillEntry {
     pub resource_id: String,
     pub resource_name: String,
     pub resource_group: String,
+    pub resource_location: String,
     // PlanName,ChargeType,Frequency
     pub publisher_name: String,
     pub plan_name: String,
