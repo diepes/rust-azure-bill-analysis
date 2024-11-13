@@ -179,11 +179,13 @@ fn print_summary(
             blue = "Blue=Combined(Changed)".blue()
         )
     };
+    // print sorted Vec by cost
     for (cost, name, source) in bill_details_sorted.iter() {
+        let currency = f64_to_currency(*cost, 2);
         let color_cost = match source {
-            CostSource::Original => format!("{cur} {cost:9.2}").red(),
-            CostSource::Secondary => format!("{cur} {cost:9.2}").green(),
-            CostSource::Combined => format!("{cur} {cost:9.2}").blue(),
+            CostSource::Original => format!("{cur} {currency:>11}").red(),
+            CostSource::Secondary => format!("{cur} {currency:>11}").green(),
+            CostSource::Combined => format!("{cur} {currency:>11}").blue(),
         };
         if *cost > global_opts.cost_min_display || *cost < -global_opts.cost_min_display {
             println!(

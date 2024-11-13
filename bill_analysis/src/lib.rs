@@ -150,7 +150,7 @@ pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts
 
 fn f64_to_currency(value: f64, decimal_places: usize) -> String {
     // Format to the specified number of decimal places
-    let formatted_value = format!("{:.*}", decimal_places, value);
+    let formatted_value = format!("{:.*}", decimal_places, value.abs()); // Use absolute value for formatting
 
     // Split integer and decimal parts
     let parts: Vec<&str> = formatted_value.split('.').collect();
@@ -169,10 +169,20 @@ fn f64_to_currency(value: f64, decimal_places: usize) -> String {
     // Reverse back to correct order
     let formatted_integer: String = formatted_integer.chars().rev().collect();
 
+    // Pad the decimal part to the specified number of decimal places
+    let padded_decimal = format!("{:0<width$}", decimal_part, width = decimal_places);
+
     // Combine integer and decimal parts
-    if decimal_places > 0 {
-        format!("{}.{}", formatted_integer, decimal_part)
+    let result = if decimal_places > 0 {
+        format!("{}.{}", formatted_integer, padded_decimal)
     } else {
         formatted_integer
+    };
+
+    // Add back the negative sign if the original value was negative
+    if value < 0.0 {
+        format!("-{}", result)
+    } else {
+        result
     }
 }
