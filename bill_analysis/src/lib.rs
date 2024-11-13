@@ -143,7 +143,7 @@ pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts
         "Savings '{category}' {cur} {savings}",
         category = category,
         cur = cur,
-        savings = f64_to_currency(bills.savings(category),2),
+        savings = f64_to_currency(bills.savings(category), 2),
     );
     println!();
 }

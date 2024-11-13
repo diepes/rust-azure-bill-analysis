@@ -6,6 +6,7 @@ use bill_analysis::cmd_parse::Commands;
 use clap::Parser; // Add this line to import the `Parser` trait from the `clap` crate
 
 fn main() {
+    let timer_run = std::time::Instant::now();
     let app = bill_analysis::cmd_parse::App::parse();
     let debug: bool;
     if app.global_opts.debug {
@@ -111,4 +112,8 @@ fn main() {
             )
         }
     }
+    println!(
+        "Total time to run: {:.3}s",
+        timer_run.elapsed().as_secs_f64()
+    );
 }
