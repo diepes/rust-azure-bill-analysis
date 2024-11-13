@@ -1,13 +1,18 @@
 use crate::bill::billentry::BillEntry;
+use crate::bill::billsummary::{CostSource, CostTotal};
 use crate::bill::costtype::CostType;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 
+use super::billsummary::SummaryData;
+
 pub struct Bills {
     pub bills: Vec<BillEntry>,
     pub billing_currency: Option<String>,
     pub tag_names: HashSet<String>,
+    pub file_name: String,
+    pub file_short_name: String,
 }
 impl Bills {
     pub fn default() -> Self {
@@ -15,6 +20,8 @@ impl Bills {
             bills: Vec::new(),
             billing_currency: None,
             tag_names: HashSet::new(),
+            file_name: "NotSet".to_string(),
+            file_short_name: "NotSet".to_string(),
         }
     }
 
@@ -113,7 +120,7 @@ impl Bills {
     // returns total_filtered_cost,
     //         set of filtered resource groups,
     //     and HashMap of filtered cost per category(each category total - total filtered cost)
-    pub fn cost_by_any(
+    pub fn cost_by_any_summary(
         &self,
         name_regex: &str,
         rg_regex: &str,
@@ -122,21 +129,17 @@ impl Bills {
         tag_summarize: &str,
         tag_filter: &str,
         _global_opts: &crate::GlobalOpts,
-    ) -> (
-        f64,
-        std::collections::HashSet<String>,
-        std::collections::HashMap<(CostType, String), f64>,
-    ) {
+    ) -> SummaryData {
         let re_name = Regex::new(name_regex).unwrap();
         let re_rg = Regex::new(rg_regex).unwrap();
         let re_subs = Regex::new(subs_regex).unwrap();
         let re_type = Regex::new(meter_category).unwrap();
         let re_tag = Regex::new(tag_filter).unwrap();
         // collect set of resource groups in set rgs
-        let mut res_details = std::collections::HashSet::new();
+        let mut summary_data = SummaryData::new();
         // bill_details record cost per filter category e.g. name_regex, rg_regex, subs_regex, meter_category
-        let mut bill_details: HashMap<(CostType, String), f64> = std::collections::HashMap::new();
-        // iter throuh bills, get total and update new bill_details for each category.
+        // per_type
+        // iter through bills, get total and update new bill_details for each category.
         let filtered_total = self.bills.iter().fold(0.0, |acc, bill| {
             let mut flag_match = true;
             if !name_regex.is_empty() && !re_name.is_match(&bill.resource_name) {
@@ -154,25 +157,50 @@ impl Bills {
             if flag_match {
                 // if all match
                 // record cost against resource_name, resource_group, subscription_name, meter_category, tag
-                bill_details
+                summary_data
+                    .per_type
                     .entry((CostType::ResourceName, bill.resource_name.clone()))
-                    .and_modify(|e| *e += bill.cost)
-                    .or_insert(bill.cost);
+                    .and_modify(|e| {
+                        e.cost += bill.cost;
+                        // e.source = CostSource::Original;
+                    })
+                    .or_insert(CostTotal {
+                        cost: bill.cost,
+                        source: CostSource::Original,
+                    });
 
-                bill_details
+                summary_data
+                    .per_type
                     .entry((CostType::ResourceGroup, bill.resource_group.clone()))
-                    .and_modify(|e| *e += bill.cost)
-                    .or_insert(bill.cost);
+                    .and_modify(|e| {
+                        e.cost += bill.cost;
+                    })
+                    .or_insert(CostTotal {
+                        cost: bill.cost,
+                        source: CostSource::Original,
+                    });
 
-                bill_details
+                summary_data
+                    .per_type
                     .entry((CostType::Subscription, bill.subscription_name.clone()))
-                    .and_modify(|e| *e += bill.cost)
-                    .or_insert(bill.cost);
+                    .and_modify(|e| {
+                        e.cost += bill.cost;
+                    })
+                    .or_insert(CostTotal {
+                        cost: bill.cost,
+                        source: CostSource::Original,
+                    });
 
-                bill_details
+                summary_data
+                    .per_type
                     .entry((CostType::MeterCategory, bill.meter_category.clone()))
-                    .and_modify(|e| *e += bill.cost)
-                    .or_insert(bill.cost);
+                    .and_modify(|e| {
+                        e.cost += bill.cost;
+                    })
+                    .or_insert(CostTotal {
+                        cost: bill.cost,
+                        source: CostSource::Original,
+                    });
 
                 // add bill_details for tags, using the matched tag and value
                 if !tag_summarize.is_empty() {
@@ -180,20 +208,32 @@ impl Bills {
                     if bill.tags.kv.contains_key(tag_summarize_lowercase) {
                         // from lowercase tag_summarize get the value and original key(Original case)
                         let v = bill.tags.kv.get(tag_summarize_lowercase).unwrap();
-                        bill_details
+                        summary_data
+                            .per_type
                             .entry((CostType::Tag, format!("tag:{}={}", v.1, v.0)))
-                            .and_modify(|e| *e += bill.cost)
-                            .or_insert(bill.cost);
+                            .and_modify(|e| {
+                                e.cost += bill.cost;
+                            })
+                            .or_insert(CostTotal {
+                                cost: bill.cost,
+                                source: CostSource::Original,
+                            });
                     } else {
                         //no tag found
-                        bill_details
+                        summary_data
+                            .per_type
                             .entry((CostType::Tag, format!("tag:none")))
-                            .and_modify(|e| *e += bill.cost)
-                            .or_insert(bill.cost);
+                            .and_modify(|e| {
+                                e.cost += bill.cost;
+                            })
+                            .or_insert(CostTotal {
+                                cost: bill.cost,
+                                source: CostSource::Original,
+                            });
                     }
                 }
 
-                res_details.insert(format!(
+                summary_data.details.insert(format!(
                     "{rg}___{rn}",
                     rg = bill.resource_group.clone(),
                     rn = bill.resource_name.clone(),
@@ -204,7 +244,8 @@ impl Bills {
             }
         });
         // bill_details should have same cost total for each category
-        (filtered_total, res_details, bill_details)
+        summary_data.filtered_cost_total = filtered_total;
+        summary_data
     }
 
     pub fn cost_by_resource_group(

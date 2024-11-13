@@ -1,3 +1,4 @@
+use regex::Regex;
 use serde::Deserialize;
 use std::error::Error;
 use std::fs::File;
@@ -75,6 +76,13 @@ impl BillEntry {
         //let mut reader = csv::Reader::from_reader(mmap.as_ref());
         let mut reader = csv::Reader::from_reader(file);
         let mut bills = Bills::default();
+        // set file name
+        bills.file_name = file_path
+            .clone()
+            .into_os_string()
+            .into_string()
+            .expect("Could not convert path to string ?");
+        bills.file_short_name = extract_date_from_file_name(&bills.file_name);
         let mut lines = 0;
         for result in reader.deserialize() {
             let mut bill: BillEntry = result?;
@@ -103,6 +111,18 @@ impl BillEntry {
         Ok(bills)
     }
 }
+fn extract_date_from_file_name(file_path: &str) -> String {
+    // Define the regex pattern to match a date of the format _YYYYMM_
+    let re = Regex::new(r"_(\d{6})_").unwrap();
+
+    // Attempt to find a match for the date
+    if let Some(caps) = re.captures(file_path) {
+        caps[1].to_string() // Return the matched date (group 1)
+    } else {
+        file_path.to_string() // Return None if no match is found
+    }
+}
+
 // Implement Eq for BillEntry
 impl Eq for BillEntry {}
 impl PartialEq for BillEntry {

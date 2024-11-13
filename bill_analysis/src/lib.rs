@@ -120,27 +120,59 @@ pub fn load_bill(file_or_folder: &PathBuf, global_opts: &GlobalOpts) -> (Bills, 
 }
 
 pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts: &GlobalOpts) {
-    println!("\n===  Displaying Azure cost summary.  {description} ===");
+    println!(
+        "\n===  Displaying Azure cost summary.  {description} {} ===",
+        bills.file_short_name
+    );
     let cur = bills.get_billing_currency();
-    println!("Total cost {cur} {t_cost:.2}, no_reservation {cur} {t_no_reservation:.2}, Unused Savings {cur} {t_unused_savings:.2}, Used Savings {cur} {t_used_savings:.2}",
-        t_cost = bills.total_effective(),
-        t_no_reservation = bills.total_no_reservation(),
-        t_unused_savings = bills.total_unused_savings(),
-        t_used_savings = bills.total_used_savings()
+    println!("Total cost {cur} {t_cost}, no_reservation {cur} {t_no_reservation}, Unused Savings {cur} {t_unused_savings}, Used Savings {cur} {t_used_savings}",
+        t_cost = f64_to_currency(bills.total_effective(),2),
+        t_no_reservation = f64_to_currency(bills.total_no_reservation(),2),
+        t_unused_savings = f64_to_currency(bills.total_unused_savings(), 2),
+        t_used_savings = f64_to_currency(bills.total_used_savings(), 2),
     );
     let category = "Virtual Machines";
     println!(
-        "Savings '{category}' {cur} {savings:.2}",
+        "Savings '{category}' {cur} {savings}",
         category = category,
         cur = cur,
-        savings = bills.savings(category)
+        savings = f64_to_currency(bills.savings(category), 2),
     );
     let category = "Azure App Service";
     println!(
-        "Savings '{category}' {cur} {savings:.2}",
+        "Savings '{category}' {cur} {savings}",
         category = category,
         cur = cur,
-        savings = bills.savings(category)
+        savings = f64_to_currency(bills.savings(category),2),
     );
     println!();
+}
+
+fn f64_to_currency(value: f64, decimal_places: usize) -> String {
+    // Format to the specified number of decimal places
+    let formatted_value = format!("{:.*}", decimal_places, value);
+
+    // Split integer and decimal parts
+    let parts: Vec<&str> = formatted_value.split('.').collect();
+    let integer_part = parts[0];
+    let decimal_part = if parts.len() > 1 { parts[1] } else { "" };
+
+    // Insert commas into the integer part
+    let mut formatted_integer = String::new();
+    for (i, c) in integer_part.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            formatted_integer.push(',');
+        }
+        formatted_integer.push(c);
+    }
+
+    // Reverse back to correct order
+    let formatted_integer: String = formatted_integer.chars().rev().collect();
+
+    // Combine integer and decimal parts
+    if decimal_places > 0 {
+        format!("{}.{}", formatted_integer, decimal_part)
+    } else {
+        formatted_integer
+    }
 }
