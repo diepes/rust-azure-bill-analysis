@@ -68,7 +68,6 @@ pub struct ResourcePriceArgs {
     /// regex find to filter on resource_region terminate with '$'
     #[arg(long)]
     pub resource_region: Option<String>,
-    
 }
 #[derive(Debug, Args)]
 pub struct DiskCsvSavingsArgs {

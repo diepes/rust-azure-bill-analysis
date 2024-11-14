@@ -155,7 +155,18 @@ impl Bills {
             // Check tags hashmap for match
             } else if !tag_filter.is_empty() && !re_tag.is_match(&bill.tags.value) {
                 flag_match = false;
-            } else if !region_regex.is_empty() && !re_region.is_match(&bill.meter_region) {
+            } else if {
+                match (
+                    region_regex,
+                    re_region.is_match(&bill.meter_region),
+                    bill.meter_region.len(),
+                ) {
+                    ("any", _, _) => false,
+                    ("", _, 1..) => true,
+                    (_, true, _) => false,
+                    (_, false, _) => true,
+                }
+            } {
                 flag_match = false;
             }
             if flag_match {

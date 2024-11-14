@@ -7,7 +7,7 @@ pub fn summary(folder: &PathBuf, global_opts: &GlobalOpts) {
     println!("Hello, world!! Calculating Azure savings form Amortized charges csv export.\n");
     //let folder = app.global_opts.billpath.unwrap();
     //ToDo: file re_pattern should be commandline override arg.
-    let (path,files) = find_files::in_folder(&folder, r"Detail_Enrollment_70785102_.*_en.csv");
+    let (path, files) = find_files::in_folder(&folder, r"Detail_Enrollment_70785102_.*_en.csv");
     println!("Found {:?} csv files.", files.len());
     for csv_file_name in files {
         // combine folder and csv_file_name into file_path

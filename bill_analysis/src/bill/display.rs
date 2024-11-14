@@ -33,7 +33,7 @@ pub fn display_cost_by_filter(
     let s_rg = rg_r.unwrap_or("".to_string());
     let s_sub = sub_r.unwrap_or("".to_string());
     let s_cat = cat_r.unwrap_or("".to_string());
-    let s_region = region_r.unwrap_or("".to_string());
+    let s_region = region_r.unwrap_or("any".to_string()); // allow for capture of empty region
     let s_tag_s = tag_summarize.clone().unwrap_or("".to_string());
     let s_tag_r = tag_filter.unwrap_or("".to_string());
     let mut display_date = latest_bill.file_short_name.clone();
@@ -120,10 +120,11 @@ pub fn display_cost_by_filter(
     }
 
     println!(
-        "Total cost {cur} {total_cost} '{display_date}'",
+        "Total cost {cur} {total_cost}  date:'{display_date}' Region:{region}",
         cur = cur,
-        total_cost = f64_to_currency(total_cost, 2),
-        display_date = display_date
+        total_cost = f64_to_currency(total_cost, 2).bold(),
+        display_date = display_date,
+        region = format!("'{}'", s_region),
     );
 
     if global_opts.tag_list {
