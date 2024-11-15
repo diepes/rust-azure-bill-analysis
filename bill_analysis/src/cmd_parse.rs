@@ -3,9 +3,10 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
-/// Here's my app!
+// Here's my app!
 #[derive(Debug, Parser)]
 #[clap(name = "bill-analysis", version)]
+#[command(help_template = "{name} version:{version}\nUSAGE:\n    {usage}\n\n{all-args}")]
 pub struct App {
     #[clap(flatten)]
     pub global_opts: GlobalOpts,
