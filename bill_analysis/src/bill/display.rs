@@ -46,7 +46,7 @@ pub fn display_cost_by_filter(
         &s_region,
         &s_tag_s,
         &s_tag_r,
-        &global_opts,
+        global_opts,
     );
     let mut total_cost = bill_summary.filtered_cost_total;
     // If we got a previous bill calculate summary and subtract.
@@ -64,7 +64,7 @@ pub fn display_cost_by_filter(
             &s_region,
             &s_tag_s,
             &s_tag_r,
-            &global_opts,
+            global_opts,
         );
         total_cost -= prev_bill_summary.filtered_cost_total;
         // merge negative values from prev_bill_details into bill_details Hashmap
@@ -86,7 +86,7 @@ pub fn display_cost_by_filter(
         bill_summary.details.extend(prev_bill_summary.details);
     }
 
-    if s_name.len() > 0 {
+    if !s_name.is_empty() {
         println!(" details: len={}", bill_summary.details.len());
         for d in bill_summary.details.iter() {
             println!(" details: {:?}", d);
@@ -102,29 +102,29 @@ pub fn display_cost_by_filter(
     print_summary(&bill_summary, &cur, CostType::ResourceGroup, global_opts);
     println!();
     // print Resource bill details
-    if s_name.len() > 0 {
+    if !s_name.is_empty() {
         print_summary(&bill_summary, &cur, CostType::ResourceName, global_opts);
     }
 
     // print Category bill details
-    if s_cat.len() > 0 {
-        print_summary(&bill_summary, &cur, CostType::MeterCategory, &global_opts);
+    if !s_cat.is_empty() {
+        print_summary(&bill_summary, &cur, CostType::MeterCategory, global_opts);
         println!()
     }
 
     // print Tag bill details
-    if s_tag_s.len() > 0 {
+    if !s_tag_s.is_empty() {
         println!("## Tag details {} '{}'", s_tag_s, display_date);
-        print_summary(&bill_summary, &cur, CostType::Tag, &global_opts);
+        print_summary(&bill_summary, &cur, CostType::Tag, global_opts);
         println!();
     }
 
     println!(
-        "Total cost {cur} {total_cost}  date:'{display_date}' Region:{region}",
+        "Total cost {cur} {total_cost}  date:'{display_date}' Region:'{s_region}'",
         cur = cur,
         total_cost = f64_to_currency(total_cost, 2).bold(),
         display_date = display_date,
-        region = format!("'{}'", s_region),
+        s_region = s_region,
     );
 
     if global_opts.tag_list {
@@ -171,7 +171,7 @@ fn print_summary(
     cost_type: CostType,
     global_opts: &GlobalOpts,
 ) {
-    let (total, cnt, bill_details_sorted) = sort_calc_total(&bill_summary, &cost_type);
+    let (total, cnt, bill_details_sorted) = sort_calc_total(bill_summary, &cost_type);
     let mut cnt_skip = 0;
 
     let color_legend = if global_opts.bill_prev_subtract_path.is_none() {

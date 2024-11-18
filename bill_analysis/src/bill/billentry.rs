@@ -51,6 +51,7 @@ pub struct BillEntry {
     pub tags: Tags,
 }
 
+// Apply the macro to specify which fields are subject to lowercasing
 macro_rules! lowercase_all_strings {
     ($struct:ident, $($field:ident),*) => {
         impl $struct {
@@ -62,8 +63,14 @@ macro_rules! lowercase_all_strings {
         }
     };
 }
-// Apply the macro to specify which fields are subject to lowercasing
-lowercase_all_strings!(BillEntry, subscription_name, resource_group, resource_name);
+lowercase_all_strings!(
+    BillEntry,
+    subscription_name,
+    resource_group,
+    resource_name,
+    tags
+);
+//
 
 impl BillEntry {
     // Function to parse the CSV file and return a vector of BillEntry structs
@@ -95,8 +102,8 @@ impl BillEntry {
             if bill.resource_group.is_empty() {
                 bill.resource_group = format!(
                     "BUY_{}_{}_{}",
-                    bill.publisher_name.replace(" ", "-"),
-                    bill.plan_name.replace(" ", "-"),
+                    bill.publisher_name.replace(' ', "-"),
+                    bill.plan_name.replace(' ', "-"),
                     bill.charge_type
                 );
             }

@@ -22,7 +22,6 @@ pub struct AzDisk {
     pub resource_group: Option<String>,
     pub location: Option<String>,
 }
-
 impl AzDisk {}
 
 pub struct AzDisks {
@@ -48,10 +47,10 @@ impl AzDisks {
      **/
     pub fn parse(file_disk: &PathBuf) -> Result<AzDisks, Box<dyn Error>> {
         let disks = if file_disk.extension().unwrap() == "csv" {
-            Self::parse_csv(&file_disk)
+            Self::parse_csv(file_disk)
                 .expect(&format!("Error parsing the csv file '{:?}'", file_disk))
         } else {
-            Self::parse_txt(&file_disk)
+            Self::parse_txt(file_disk)
                 .expect(&format!("Error parsing the txt file '{:?}'", file_disk))
         };
         Ok(disks)

@@ -10,6 +10,14 @@ pub struct Tags {
     pub kv: HashMap<String, (String, String)>,
     pub value: String,
 }
+impl Tags {
+    pub fn to_lowercase(&mut self) -> Tags {
+        Tags {
+            kv: self.kv.clone(),
+            value: self.value.to_lowercase(),
+        }
+    }
+}
 
 // Implement Deserialize for Tags, Vec<Tag>
 impl<'de> Deserialize<'de> for Tags {
@@ -47,7 +55,7 @@ impl<'de> Deserialize<'de> for Tags {
         //println!("kv: {:?}", kv);
         // Return the Tags struct with the populated HashMap
         Ok(Tags {
-            kv: kv,
+            kv,
             value: s.to_lowercase(),
         })
     }

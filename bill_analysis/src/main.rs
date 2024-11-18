@@ -8,14 +8,13 @@ use clap::Parser; // Add this line to import the `Parser` trait from the `clap` 
 fn main() {
     let timer_run = std::time::Instant::now();
     let app = bill_analysis::cmd_parse::App::parse();
-    let debug: bool;
-    if app.global_opts.debug {
+    let debug: bool = if app.global_opts.debug {
         println!("Debug mode activated {:?}", app.command);
-        debug = true;
+        true
     } else {
         //println!("Debug mode not activated {:?}", app.command);
-        debug = false;
-    }
+        false
+    };
     let bill_path = app.global_opts.bill_path.clone().unwrap();
     match app.command {
         Some(Commands::BillSummary(args)) => {
@@ -47,7 +46,10 @@ fn main() {
         Some(Commands::DiskCsvSavings(args)) => {
             bill_analysis::calc_disks_cost(
                 args.diskfile,
-                app.global_opts.bill_path.clone().unwrap(),
+                &app.global_opts
+                    .bill_path
+                    .clone()
+                    .expect("Bill path not set ?"),
                 &app.global_opts,
             );
         }

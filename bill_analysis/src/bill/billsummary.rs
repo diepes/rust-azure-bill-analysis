@@ -22,8 +22,8 @@ pub struct SummaryData {
     pub details: std::collections::HashSet<String>,
     pub filtered_cost_total: f64,
 }
-impl SummaryData {
-    pub fn new() -> SummaryData {
+impl Default for SummaryData {
+    fn default() -> SummaryData {
         SummaryData {
             per_type: std::collections::HashMap::new(),
             details: std::collections::HashSet::new(),

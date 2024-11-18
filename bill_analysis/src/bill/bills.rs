@@ -1,7 +1,7 @@
 use crate::bill::billentry::BillEntry;
 use crate::bill::billsummary::{CostSource, CostTotal};
 use crate::bill::costtype::CostType;
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 
@@ -14,8 +14,8 @@ pub struct Bills {
     pub file_name: String,
     pub file_short_name: String,
 }
-impl Bills {
-    pub fn default() -> Self {
+impl Default for Bills {
+    fn default() -> Self {
         Self {
             bills: Vec::new(),
             billing_currency: None,
@@ -24,7 +24,8 @@ impl Bills {
             file_short_name: "NotSet".to_string(),
         }
     }
-
+}
+impl Bills {
     pub fn remove(&mut self, other: Bills) {
         // ToDo: Probaly faulty, only drops matching values.
         //       Move logic into summary to use both bills.
@@ -129,16 +130,34 @@ impl Bills {
         region_regex: &str,
         tag_summarize: &str,
         tag_filter: &str,
-        _global_opts: &crate::GlobalOpts,
+        global_opts: &crate::GlobalOpts,
     ) -> SummaryData {
-        let re_name = Regex::new(name_regex).unwrap();
-        let re_rg = Regex::new(rg_regex).unwrap();
-        let re_subs = Regex::new(subs_regex).unwrap();
-        let re_type = Regex::new(meter_category).unwrap();
-        let re_region = Regex::new(region_regex).unwrap();
-        let re_tag = Regex::new(tag_filter).unwrap();
+        let re_name = RegexBuilder::new(name_regex)
+            .case_insensitive(!global_opts.case_sensitive)
+            .build()
+            .expect("Invalid regex for name");
+        let re_rg = RegexBuilder::new(rg_regex)
+            .case_insensitive(!global_opts.case_sensitive)
+            .build()
+            .expect("Invalid regex for resource group");
+        let re_subs = RegexBuilder::new(subs_regex)
+            .case_insensitive(!global_opts.case_sensitive)
+            .build()
+            .expect("Invalid regex for subscription");
+        let re_type = RegexBuilder::new(meter_category)
+            .case_insensitive(!global_opts.case_sensitive)
+            .build()
+            .expect("Invalid regex for meter category");
+        let re_region = RegexBuilder::new(region_regex)
+            .case_insensitive(!global_opts.case_sensitive)
+            .build()
+            .expect("Invalid regex for region");
+        let re_tag = RegexBuilder::new(tag_filter)
+            .case_insensitive(!global_opts.case_sensitive)
+            .build()
+            .expect("Invalid regex for tag");
         // collect set of resource groups in set rgs
-        let mut summary_data = SummaryData::new();
+        let mut summary_data = SummaryData::default();
         // bill_details record cost per filter category e.g. name_regex, rg_regex, subs_regex, meter_category
         // per_type
         // iter through bills, get total and update new bill_details for each category.
@@ -155,17 +174,15 @@ impl Bills {
             // Check tags hashmap for match
             } else if !tag_filter.is_empty() && !re_tag.is_match(&bill.tags.value) {
                 flag_match = false;
-            } else if {
-                match (
-                    region_regex,
-                    re_region.is_match(&bill.meter_region),
-                    bill.meter_region.len(),
-                ) {
-                    ("any", _, _) => false,
-                    ("", _, 1..) => true,
-                    (_, true, _) => false,
-                    (_, false, _) => true,
-                }
+            } else if match (
+                region_regex,
+                re_region.is_match(&bill.meter_region),
+                bill.meter_region.len(),
+            ) {
+                ("any", _, _) => false,
+                ("", _, 1..) => true,
+                (_, true, _) => false,
+                (_, false, _) => true,
             } {
                 flag_match = false;
             }
@@ -219,10 +236,14 @@ impl Bills {
 
                 // add bill_details for tags, using the matched tag and value
                 if !tag_summarize.is_empty() {
-                    let tag_summarize_lowercase = &tag_summarize.to_lowercase();
-                    if bill.tags.kv.contains_key(tag_summarize_lowercase) {
+                    let tag_summarize_lowercase = if global_opts.case_sensitive {
+                        tag_filter.to_string()
+                    } else {
+                        tag_summarize.to_lowercase()
+                    };
+                    if bill.tags.kv.contains_key(&tag_summarize_lowercase) {
                         // from lowercase tag_summarize get the value and original key(Original case)
-                        let v = bill.tags.kv.get(tag_summarize_lowercase).unwrap();
+                        let v = bill.tags.kv.get(&tag_summarize_lowercase).unwrap();
                         summary_data
                             .per_type
                             .entry((CostType::Tag, format!("tag:{}={}", v.1, v.0)))
@@ -237,7 +258,7 @@ impl Bills {
                         //no tag found
                         summary_data
                             .per_type
-                            .entry((CostType::Tag, format!("tag:none")))
+                            .entry((CostType::Tag, "tag:none".to_string()))
                             .and_modify(|e| {
                                 e.cost += bill.cost;
                             })

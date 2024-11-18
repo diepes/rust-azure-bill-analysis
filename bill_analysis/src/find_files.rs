@@ -1,9 +1,9 @@
 use regex::Regex; // Add this line to import the `Regex` struct from the `regex` crate
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// split path and search folder for files matching the path.file_name() or if not present with file_re_pattern
-pub fn in_folder(path: &PathBuf, file_re_pattern: &str) -> (PathBuf, Vec<String>) {
+pub fn in_folder(path: &Path, file_re_pattern: &str) -> (PathBuf, Vec<String>) {
     let mut files = Vec::new();
     // extract the folder or set to ./(current folder)
     let folder;
