@@ -92,29 +92,6 @@ impl Bills {
             }
         })
     }
-    // cost_by_resource_name_regex
-    // returns the total cost of all bills in the resource_name and a set of all resource names matched.
-    // pub fn cost_by_resource_name_regex(
-    //     &self,
-    //     resource_regex: &str,
-    // ) -> (f64, std::collections::HashSet<String>) {
-    //     let re_res = Regex::new(resource_regex).unwrap();
-    //     // collect set of resource groups in set rgs
-    //     let mut res_details = std::collections::HashSet::new();
-    //     let bill = self.bills.iter().fold(0.0, |acc, bill| {
-    //         if re_res.is_match(&bill.resource_name) {
-    //             res_details.insert(format!(
-    //                 "{}___{}",
-    //                 bill.resource_group.clone(),
-    //                 bill.resource_name.clone(),
-    //             ));
-    //             acc + bill.cost
-    //         } else {
-    //             acc
-    //         }
-    //     });
-    //     (bill, res_details)
-    // }
 
     // function cost_by_any
     // takes name_regex, rg_regex, subs_regex, meter_category, tag_regex and returns total where all match,
@@ -285,23 +262,23 @@ impl Bills {
         summary_data
     }
 
-    pub fn cost_by_resource_group(
-        &self,
-        resource_group: &str,
-    ) -> (f64, std::collections::HashSet<String>) {
-        let re_rg = Regex::new(resource_group).unwrap();
-        // collect set of resource groups in set rgs
-        let mut rgs = std::collections::HashSet::new();
-        let bill = self.bills.iter().fold(0.0, |acc, bill| {
-            if re_rg.is_match(&bill.resource_group) {
-                rgs.insert(bill.resource_group.clone());
-                acc + bill.cost
-            } else {
-                acc
-            }
-        });
-        (bill, rgs)
-    }
+    // pub fn cost_by_resource_group(
+    //     &self,
+    //     resource_group: &str,
+    // ) -> (f64, std::collections::HashSet<String>) {
+    //     let re_rg = Regex::new(resource_group).unwrap();
+    //     // collect set of resource groups in set rgs
+    //     let mut rgs = std::collections::HashSet::new();
+    //     let bill = self.bills.iter().fold(0.0, |acc, bill| {
+    //         if re_rg.is_match(&bill.resource_group) {
+    //             rgs.insert(bill.resource_group.clone());
+    //             acc + bill.cost
+    //         } else {
+    //             acc
+    //         }
+    //     });
+    //     (bill, rgs)
+    // }
 
     /// Similar to cost_by_resource_group, for cost_by_subscription
     /// returns the total cost of all bills in the subscription and a set of all subscription names matched.

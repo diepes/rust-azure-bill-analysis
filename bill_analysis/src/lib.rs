@@ -9,23 +9,23 @@ use std::path::{Path, PathBuf};
 
 use cmd_parse::GlobalOpts;
 
-pub fn calc_resource_group_cost(
-    resource_group: &str,
-    file_or_folder: &Path,
-    global_opts: &GlobalOpts,
-) {
-    println!("Calculating Azure rg:\"{resource_group}\" cost from csv export.\n");
-    let (latest_bill, _file_name) = load_latest_bill(file_or_folder, global_opts);
-    println!();
-    // now that we have latest_bill and disks, lookup disk cost in latest_bill
-    // and print the cost
-    let cur = latest_bill.get_billing_currency();
-    let mut total_cost: f64 = 0.0;
-    let (rg_cost, rgs) = latest_bill.cost_by_resource_group(resource_group);
-    println!("cost {cur} {rg_cost:7.2} - rg: '{resource_group:?}' ");
-    total_cost += rg_cost;
-    println!("Total cost {cur} {total_cost:.2} rg's:{:?}", rgs);
-}
+// pub fn calc_resource_group_cost(
+//     resource_group: &str,
+//     file_or_folder: &Path,
+//     global_opts: &GlobalOpts,
+// ) {
+//     println!("Calculating Azure rg:\"{resource_group}\" cost from csv export.\n");
+//     let (latest_bill, _file_name) = load_latest_bill(file_or_folder, global_opts);
+//     println!();
+//     // now that we have latest_bill and disks, lookup disk cost in latest_bill
+//     // and print the cost
+//     let cur = latest_bill.get_billing_currency();
+//     let mut total_cost: f64 = 0.0;
+//     let (rg_cost, rgs) = latest_bill.cost_by_resource_group(resource_group);
+//     println!("cost {cur} {rg_cost:7.2} - rg: '{resource_group:?}' ");
+//     total_cost += rg_cost;
+//     println!("Total cost {cur} {total_cost:.2} rg's:{:?}", rgs);
+// }
 
 // function calc_subscription_cost
 pub fn calc_subscription_cost(subscription: &str, file_or_folder: &Path, global_opts: &GlobalOpts) {
