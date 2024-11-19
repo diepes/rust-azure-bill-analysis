@@ -9,24 +9,6 @@ use std::path::{Path, PathBuf};
 
 use cmd_parse::GlobalOpts;
 
-// pub fn calc_resource_group_cost(
-//     resource_group: &str,
-//     file_or_folder: &Path,
-//     global_opts: &GlobalOpts,
-// ) {
-//     println!("Calculating Azure rg:\"{resource_group}\" cost from csv export.\n");
-//     let (latest_bill, _file_name) = load_latest_bill(file_or_folder, global_opts);
-//     println!();
-//     // now that we have latest_bill and disks, lookup disk cost in latest_bill
-//     // and print the cost
-//     let cur = latest_bill.get_billing_currency();
-//     let mut total_cost: f64 = 0.0;
-//     let (rg_cost, rgs) = latest_bill.cost_by_resource_group(resource_group);
-//     println!("cost {cur} {rg_cost:7.2} - rg: '{resource_group:?}' ");
-//     total_cost += rg_cost;
-//     println!("Total cost {cur} {total_cost:.2} rg's:{:?}", rgs);
-// }
-
 // function calc_subscription_cost
 pub fn calc_subscription_cost(subscription: &str, file_or_folder: &Path, global_opts: &GlobalOpts) {
     println!("Calculating Azure subscription:\"{subscription}\" cost from csv export.\n");
@@ -84,32 +66,6 @@ pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: &Path, global_opts: &
     println!("    from file '{:?}'", file_name_bill);
     println!("Total cost {cur} {total_cost:.2}");
 }
-
-// pub fn cost_by_resource_name_regex(
-//     name_regex: &str,
-//     file_or_folder: &Path,
-//     global_opts: &GlobalOpts,
-// ) {
-//     println!("Calculating Azure cost from csv export regex \"{name_regex}\".\n");
-//     let (latest_bill, _file_name) = load_latest_bill(file_or_folder, global_opts);
-//     println!();
-//     // now that we have latest_bill and disks, lookup disk cost in latest_bill
-//     // and print the cost
-//     let cur = latest_bill.get_billing_currency();
-//     let mut total_cost: f64 = 0.0;
-//     let (item_cost, details) = latest_bill.cost_by_resource_name_regex(name_regex);
-//     println!("cost {cur} {item_cost:7.2} - regex:'{name_regex:?}' ");
-//     total_cost += item_cost;
-//     if details.len() < 4 {
-//         println!(" details: {:?}", details);
-//     } else {
-//         println!(" details: len={}", details.len());
-//         for d in details.iter() {
-//             println!(" details: {:?}", d);
-//         }
-//     }
-//     println!("Total cost {cur} {total_cost:.2}");
-// }
 
 pub fn load_bill(file_or_folder: &Path, global_opts: &GlobalOpts) -> (Bills, String) {
     let (latest_bill, file_name) = load_latest_bill(file_or_folder, global_opts);
