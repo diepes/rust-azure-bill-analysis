@@ -39,7 +39,6 @@ pub struct App {
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     BillSummary(BillSummaryArgs),
-    ResourcePrice(ResourcePriceArgs),
     DiskCsvSavings(DiskCsvSavingsArgs),
     // /// Number of times to greet
     // #[arg(short, long, default_value_t = 1)]
@@ -51,24 +50,6 @@ pub struct BillSummaryArgs {
     #[arg(short, long, default_value = "./csv_data/")]
     pub billpath: PathBuf,
     // // a list of other write args
-}
-#[derive(Debug, Args)]
-pub struct ResourcePriceArgs {
-    /// Path to find Azure disk's csv files
-    #[arg(short, long, default_value = "../Azuredisks-Unattached-20240517.csv")]
-    pub diskfile: PathBuf,
-    /// regex find to filter on specific resource name, if not using diskfile option.'$'
-    #[arg(short, long)]
-    pub name_regex: Option<String>,
-    /// regex find to filter on resource group terminate with '$'
-    #[arg(short, long)]
-    pub resource_group: Option<String>,
-    /// regex find to filter on subscriptions terminate with '$'
-    #[arg(short, long)]
-    pub subscription: Option<String>,
-    /// regex find to filter on resource_region terminate with '$'
-    #[arg(long)]
-    pub resource_region: Option<String>,
 }
 #[derive(Debug, Args)]
 pub struct DiskCsvSavingsArgs {

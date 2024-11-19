@@ -2,6 +2,7 @@ pub mod az_disk;
 pub mod bill;
 use bill::billentry::BillEntry;
 use bill::bills::Bills;
+use colored::Colorize;
 pub mod cmd_parse;
 pub mod find_files;
 use std::path::{Path, PathBuf};
@@ -84,31 +85,31 @@ pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: &Path, global_opts: &
     println!("Total cost {cur} {total_cost:.2}");
 }
 
-pub fn cost_by_resource_name_regex(
-    name_regex: &str,
-    file_or_folder: &Path,
-    global_opts: &GlobalOpts,
-) {
-    println!("Calculating Azure cost from csv export regex \"{name_regex}\".\n");
-    let (latest_bill, _file_name) = load_latest_bill(file_or_folder, global_opts);
-    println!();
-    // now that we have latest_bill and disks, lookup disk cost in latest_bill
-    // and print the cost
-    let cur = latest_bill.get_billing_currency();
-    let mut total_cost: f64 = 0.0;
-    let (item_cost, details) = latest_bill.cost_by_resource_name_regex(name_regex);
-    println!("cost {cur} {item_cost:7.2} - regex:'{name_regex:?}' ");
-    total_cost += item_cost;
-    if details.len() < 4 {
-        println!(" details: {:?}", details);
-    } else {
-        println!(" details: len={}", details.len());
-        for d in details.iter() {
-            println!(" details: {:?}", d);
-        }
-    }
-    println!("Total cost {cur} {total_cost:.2}");
-}
+// pub fn cost_by_resource_name_regex(
+//     name_regex: &str,
+//     file_or_folder: &Path,
+//     global_opts: &GlobalOpts,
+// ) {
+//     println!("Calculating Azure cost from csv export regex \"{name_regex}\".\n");
+//     let (latest_bill, _file_name) = load_latest_bill(file_or_folder, global_opts);
+//     println!();
+//     // now that we have latest_bill and disks, lookup disk cost in latest_bill
+//     // and print the cost
+//     let cur = latest_bill.get_billing_currency();
+//     let mut total_cost: f64 = 0.0;
+//     let (item_cost, details) = latest_bill.cost_by_resource_name_regex(name_regex);
+//     println!("cost {cur} {item_cost:7.2} - regex:'{name_regex:?}' ");
+//     total_cost += item_cost;
+//     if details.len() < 4 {
+//         println!(" details: {:?}", details);
+//     } else {
+//         println!(" details: len={}", details.len());
+//         for d in details.iter() {
+//             println!(" details: {:?}", d);
+//         }
+//     }
+//     println!("Total cost {cur} {total_cost:.2}");
+// }
 
 pub fn load_bill(file_or_folder: &Path, global_opts: &GlobalOpts) -> (Bills, String) {
     let (latest_bill, file_name) = load_latest_bill(file_or_folder, global_opts);
@@ -124,8 +125,8 @@ pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts
     println!("Total cost {cur} {t_cost}, no_reservation {cur} {t_no_reservation}, Unused Savings {cur} {t_unused_savings}, Used Savings {cur} {t_used_savings}",
         t_cost = f64_to_currency(bills.total_effective(),2),
         t_no_reservation = f64_to_currency(bills.total_no_reservation(),2),
-        t_unused_savings = f64_to_currency(bills.total_unused_savings(), 2),
-        t_used_savings = f64_to_currency(bills.total_used_savings(), 2),
+        t_unused_savings = f64_to_currency(bills.total_unused_savings(), 2).on_red(),
+        t_used_savings = f64_to_currency(bills.total_used_savings(), 2).on_green(),
     );
     let category = "Virtual Machines";
     println!(

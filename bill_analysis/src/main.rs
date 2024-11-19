@@ -22,27 +22,6 @@ fn main() {
             // bill_analysis::calc_bill_summary(&bill_path, &app.global_opts);
             bill::calc::summary::summary(&bill_path, &app.global_opts);
         }
-        Some(Commands::ResourcePrice(args)) => {
-            println!("Running '--resource-price' command with args: {:?}", args);
-            if let Some(resource_group) = args.resource_group {
-                println!("got Resource group: {:?}", resource_group);
-                bill_analysis::calc_resource_group_cost(
-                    &resource_group,
-                    &bill_path,
-                    &app.global_opts,
-                );
-            } else if let Some(subscription) = args.subscription {
-                println!("got Subscription: {:?}", subscription);
-                bill_analysis::calc_subscription_cost(&subscription, &bill_path, &app.global_opts);
-            } else if let Some(name_regex) = args.name_regex {
-                println!("got Regex: {:?}", name_regex);
-                bill_analysis::cost_by_resource_name_regex(
-                    &name_regex,
-                    &bill_path,
-                    &app.global_opts,
-                );
-            }
-        }
         Some(Commands::DiskCsvSavings(args)) => {
             bill_analysis::calc_disks_cost(
                 args.diskfile,

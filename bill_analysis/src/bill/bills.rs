@@ -46,19 +46,19 @@ impl Bills {
             .fold(0.0, |acc, bill| acc + bill.effective_price * bill.quantity)
     }
     // Function to calculte the total savings
-    // benefit_name != "" && charge_type == "Usage" then sum the (unit_price - effective_price) * quantity for each bill
     // https://learn.microsoft.com/en-us/azure/cost-management-billing/reservations/calculate-ea-reservations-savings
     pub fn total_used_savings(&self) -> f64 {
         self.bills.iter().fold(0.0, |acc, bill| {
-            // if bill.benefit_name != "" && bill.charge_type == "Usage" {
             if !bill.reservation_name.is_empty() && bill.charge_type == "Usage" {
                 acc + (bill.unit_price - bill.effective_price) * bill.quantity
+                // assert_eq!(bill.pricing_model, "Reservation", "pricing_model mismatch");
             } else {
                 acc
             }
         })
     }
     pub fn total_unused_savings(&self) -> f64 {
+        // In the billing data there is a charge_type "UnusedReservation" for every "date" and reservation.
         self.bills.iter().fold(0.0, |acc, bill| {
             if bill.charge_type == "UnusedSavingsPlan" || bill.charge_type == "UnusedReservation" {
                 acc + bill.effective_price * bill.quantity
@@ -81,6 +81,7 @@ impl Bills {
             }
         })
     }
+    // filter cost for specific resource e.g. disk
     pub fn cost_by_resource_name(&self, resource_name: &str) -> f64 {
         self.bills.iter().fold(0.0, |acc, bill| {
             // bill.subscription_name == resource_group &&
@@ -93,27 +94,27 @@ impl Bills {
     }
     // cost_by_resource_name_regex
     // returns the total cost of all bills in the resource_name and a set of all resource names matched.
-    pub fn cost_by_resource_name_regex(
-        &self,
-        resource_regex: &str,
-    ) -> (f64, std::collections::HashSet<String>) {
-        let re_res = Regex::new(resource_regex).unwrap();
-        // collect set of resource groups in set rgs
-        let mut res_details = std::collections::HashSet::new();
-        let bill = self.bills.iter().fold(0.0, |acc, bill| {
-            if re_res.is_match(&bill.resource_name) {
-                res_details.insert(format!(
-                    "{}___{}",
-                    bill.resource_group.clone(),
-                    bill.resource_name.clone(),
-                ));
-                acc + bill.cost
-            } else {
-                acc
-            }
-        });
-        (bill, res_details)
-    }
+    // pub fn cost_by_resource_name_regex(
+    //     &self,
+    //     resource_regex: &str,
+    // ) -> (f64, std::collections::HashSet<String>) {
+    //     let re_res = Regex::new(resource_regex).unwrap();
+    //     // collect set of resource groups in set rgs
+    //     let mut res_details = std::collections::HashSet::new();
+    //     let bill = self.bills.iter().fold(0.0, |acc, bill| {
+    //         if re_res.is_match(&bill.resource_name) {
+    //             res_details.insert(format!(
+    //                 "{}___{}",
+    //                 bill.resource_group.clone(),
+    //                 bill.resource_name.clone(),
+    //             ));
+    //             acc + bill.cost
+    //         } else {
+    //             acc
+    //         }
+    //     });
+    //     (bill, res_details)
+    // }
 
     // function cost_by_any
     // takes name_regex, rg_regex, subs_regex, meter_category, tag_regex and returns total where all match,
