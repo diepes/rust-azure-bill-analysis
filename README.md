@@ -19,7 +19,8 @@ Rust tool to summarize Detailed Azure bill
 
 * Get cost total for all subscriptions containing a '7'
 
-       cargo build --release --manifest-path bill_analysis/Cargo.toml
+       cd bill_analysis
+       cargo run --release --
        #
        cargo build --release -- --subscription "torpedo7" --bill-prev-subtract-path ./csv_data/*202409*.csv
        #
@@ -53,3 +54,7 @@ watch
 
 * src/bill.rs replaced file read with mmap, no speedup
   * when run with --release 6s drop to 0.6s even for normal file read.
+
+## ToDo
+
+* Error out if partial csv file name match is not unique

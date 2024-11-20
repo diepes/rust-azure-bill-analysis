@@ -94,6 +94,9 @@ impl BillEntry {
         bills.file_short_name = extract_date_from_file_name(&bills.file_name);
         let mut lines = 0;
         for result in reader.deserialize() {
+            if result.is_err() {
+                println!("Error parsing line #{} in file {}", lines,file_path.display());
+            }
             let mut bill: BillEntry = result?;
             if !global_opts.case_sensitive {
                 bill.lowercase_all_strings();
