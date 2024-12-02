@@ -106,6 +106,7 @@ impl Bills {
         subs_regex: &str,
         meter_category: &str,
         region_regex: &str,
+        reservation_regex: &str,
         tag_summarize: &str,
         tag_filter: &str,
         global_opts: &crate::GlobalOpts,
@@ -130,6 +131,10 @@ impl Bills {
             .case_insensitive(!global_opts.case_sensitive)
             .build()
             .expect("Invalid regex for region");
+        let re_reservation = RegexBuilder::new(reservation_regex)
+            .case_insensitive(!global_opts.case_sensitive)
+            .build()
+            .expect("Invalid regex for reservation");
         let re_tag = RegexBuilder::new(tag_filter)
             .case_insensitive(!global_opts.case_sensitive)
             .build()
@@ -152,6 +157,9 @@ impl Bills {
             // Check tags hashmap for match
             } else if !tag_filter.is_empty() && !re_tag.is_match(&bill.tags.value) {
                 flag_match = false;
+            } else if !reservation_regex.is_empty() && !re_reservation.is_match(&bill.benefit_name)
+            {
+                flag_match = false;
             } else if match (
                 region_regex,
                 re_region.is_match(&bill.meter_region),
@@ -167,15 +175,17 @@ impl Bills {
             if flag_match {
                 // if all match
                 // record cost against resource_name, resource_group, subscription_name, meter_category, tag
+                let cost_unreserved = bill.unit_price * bill.quantity;
                 summary_data
                     .per_type
                     .entry((CostType::ResourceName, bill.resource_name.clone()))
                     .and_modify(|e| {
                         e.cost += bill.cost;
-                        // e.source = CostSource::Original;
+                        e.cost_unreserved += cost_unreserved;
                     })
                     .or_insert(CostTotal {
                         cost: bill.cost,
+                        cost_unreserved: cost_unreserved,
                         source: CostSource::Original,
                     });
 
@@ -184,9 +194,11 @@ impl Bills {
                     .entry((CostType::ResourceGroup, bill.resource_group.clone()))
                     .and_modify(|e| {
                         e.cost += bill.cost;
+                        e.cost_unreserved += cost_unreserved;
                     })
                     .or_insert(CostTotal {
                         cost: bill.cost,
+                        cost_unreserved: cost_unreserved,
                         source: CostSource::Original,
                     });
 
@@ -195,9 +207,11 @@ impl Bills {
                     .entry((CostType::Subscription, bill.subscription_name.clone()))
                     .and_modify(|e| {
                         e.cost += bill.cost;
+                        e.cost_unreserved += cost_unreserved;
                     })
                     .or_insert(CostTotal {
                         cost: bill.cost,
+                        cost_unreserved: cost_unreserved,
                         source: CostSource::Original,
                     });
 
@@ -206,9 +220,24 @@ impl Bills {
                     .entry((CostType::MeterCategory, bill.meter_category.clone()))
                     .and_modify(|e| {
                         e.cost += bill.cost;
+                        e.cost_unreserved += cost_unreserved;
                     })
                     .or_insert(CostTotal {
                         cost: bill.cost,
+                        cost_unreserved: cost_unreserved,
+                        source: CostSource::Original,
+                    });
+
+                summary_data
+                    .per_type
+                    .entry((CostType::Reservation, bill.benefit_name.clone()))
+                    .and_modify(|e| {
+                        e.cost += bill.cost;
+                        e.cost_unreserved += cost_unreserved;
+                    })
+                    .or_insert(CostTotal {
+                        cost: bill.cost,
+                        cost_unreserved: cost_unreserved,
                         source: CostSource::Original,
                     });
 
@@ -227,9 +256,11 @@ impl Bills {
                             .entry((CostType::Tag, format!("tag:{}={}", v.1, v.0)))
                             .and_modify(|e| {
                                 e.cost += bill.cost;
+                                e.cost_unreserved += cost_unreserved;
                             })
                             .or_insert(CostTotal {
                                 cost: bill.cost,
+                                cost_unreserved: cost_unreserved,
                                 source: CostSource::Original,
                             });
                     } else {
@@ -239,9 +270,11 @@ impl Bills {
                             .entry((CostType::Tag, "tag:none".to_string()))
                             .and_modify(|e| {
                                 e.cost += bill.cost;
+                                e.cost_unreserved += cost_unreserved;
                             })
                             .or_insert(CostTotal {
                                 cost: bill.cost,
+                                cost_unreserved: cost_unreserved,
                                 source: CostSource::Original,
                             });
                     }

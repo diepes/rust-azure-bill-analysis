@@ -16,6 +16,7 @@ pub fn display_cost_by_filter(
     sub_r: Option<String>,
     cat_r: Option<String>,
     region_r: Option<String>,
+    reservation_r: Option<String>,
     tag_summarize: Option<String>,
     tag_filter: Option<String>,
     // file_or_folder: PathBuf,
@@ -25,7 +26,7 @@ pub fn display_cost_by_filter(
     global_opts: &GlobalOpts,
 ) {
     println!();
-    println!("Filter Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}, tag_r:{tag_filter:?}, tag_s:{tag_summarize:?}, region_r:{region_r:?}.\n");
+    println!("Filter Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}, tag_r:{tag_filter:?}, tag_s:{tag_summarize:?}, region_r:{region_r:?}, reservation_r:{reservation_r:?}.\n");
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
     // and print the cost
     let cur = latest_bill.get_billing_currency();
@@ -34,6 +35,7 @@ pub fn display_cost_by_filter(
     let s_sub = sub_r.unwrap_or("".to_string());
     let s_cat = cat_r.unwrap_or("".to_string());
     let s_region = region_r.unwrap_or("any".to_string()); // allow for capture of empty region
+    let s_reservation = reservation_r.unwrap_or("".to_string());
     let s_tag_s = tag_summarize.clone().unwrap_or("".to_string());
     let s_tag_r = tag_filter.unwrap_or("".to_string());
     let mut display_date = latest_bill.file_short_name.clone();
@@ -44,6 +46,7 @@ pub fn display_cost_by_filter(
         &s_sub,
         &s_cat,
         &s_region,
+        &s_reservation,
         &s_tag_s,
         &s_tag_r,
         global_opts,
@@ -62,6 +65,7 @@ pub fn display_cost_by_filter(
             &s_sub,
             &s_cat,
             &s_region,
+            &s_reservation,
             &s_tag_s,
             &s_tag_r,
             global_opts,
@@ -79,6 +83,7 @@ pub fn display_cost_by_filter(
                 })
                 .or_insert(CostTotal {
                     cost: -prev_cost_total.cost,
+                    cost_unreserved: -prev_cost_total.cost_unreserved,
                     source: CostSource::Secondary,
                 });
         }
@@ -112,6 +117,12 @@ pub fn display_cost_by_filter(
         println!()
     }
 
+    // print Reservation bill details
+    if !s_reservation.is_empty() {
+        print_summary(&bill_summary, &cur, CostType::Reservation, global_opts);
+        println!()
+    }
+
     // print Tag bill details
     if !s_tag_s.is_empty() {
         println!("## Tag details {} '{}'", s_tag_s, display_date);
@@ -141,27 +152,31 @@ fn sort_calc_total<'a>(
     //bill_details: &'a std::collections::HashMap<(CostType, String), CostTotal>,
     bill_details: &'a billsummary::SummaryData,
     cost_type: &CostType,
-) -> (f64, i32, Vec<(f64, &'a str, CostSource)>) {
+) -> (f64, f64, i32, Vec<(f64, f64, &'a str, CostSource)>) {
     let mut total = 0.0;
+    let mut total_unreserved = 0.0;
     let mut cnt = 0;
     // create Vec from HashMap for specific CostType
-    let mut bill_details_sorted: Vec<(f64, &str, CostSource)> = bill_details
+    let mut bill_details_sorted: Vec<(f64, f64, &str, CostSource)> = bill_details
         .per_type
         .iter()
         .filter_map(|((grp, name), cost)| {
             if grp == cost_type {
                 total += cost.cost;
+                total_unreserved += cost.cost_unreserved;
                 cnt += 1;
                 // return some or none
-                Some((cost.cost, name.as_str(), cost.source))
+                Some((cost.cost, cost.cost_unreserved, name.as_str(), cost.source))
             } else {
                 None
             }
         })
         .collect();
     // sort Vec by cost
-    bill_details_sorted.sort_by(|(a, _na, _srca), (b, _nb, _srcb)| a.partial_cmp(b).unwrap());
-    (total, cnt, bill_details_sorted)
+    bill_details_sorted
+        .sort_by(|(a, _resa, _na, _srca), (b, _resb, _nb, _srcb)| a.partial_cmp(b).unwrap());
+    //
+    (total, total_unreserved, cnt, bill_details_sorted)
 }
 
 /// print_summary for Subscription, ResourceGroup, ResourceName, MeterCategory
@@ -171,26 +186,34 @@ fn print_summary(
     cost_type: CostType,
     global_opts: &GlobalOpts,
 ) {
-    let (total, cnt, bill_details_sorted) = sort_calc_total(bill_summary, &cost_type);
+    let (total, total_unreserved, cnt, bill_details_sorted) =
+        sort_calc_total(bill_summary, &cost_type);
     let mut cnt_skip = 0;
 
     let color_legend = if global_opts.bill_prev_subtract_path.is_none() {
         "".to_string()
     } else {
         format!(
-            "Legend: cost colour's {red} {green} {blue}",
+            "Legend: cost colour's {red} {green} {blue} {yellow}",
             red = "Red=Original(New)".red(),
             green = "Green=Previous(Gone)".green(),
-            blue = "Blue=Combined(Changed)".blue()
+            blue = "Blue=Combined(Changed)".blue(),
+            yellow = "Yellow=ReservationSavings".yellow(),
         )
     };
     // print sorted Vec by cost
-    for (cost, name, source) in bill_details_sorted.iter() {
+    for (cost, cost_unreserved, name, source) in bill_details_sorted.iter() {
         let currency = f64_to_currency(*cost, 2);
+        let _cur_unreserved = f64_to_currency(*cost_unreserved, 2);
+        let savings = *cost_unreserved - *cost;
+        let cur_savings = f64_to_currency(savings, 2);
+        let part1 = format!("{cur} {currency:>11}");
+        let part2 = if savings > 1.0 { format!("+{cur_savings:>9}") } else { "".to_string() };
+
         let color_cost = match source {
-            CostSource::Original => format!("{cur} {currency:>11}").red(),
-            CostSource::Secondary => format!("{cur} {currency:>11}").green(),
-            CostSource::Combined => format!("{cur} {currency:>11}").blue(),
+            CostSource::Original => format!("{} {:>11}",part1.red(),part2.yellow()),
+            CostSource::Secondary => format!("{} {:>11}",part1.green(),part2.yellow()),
+            CostSource::Combined => format!("{} {:>11}",part1.blue(),part2.yellow()),
         };
         if *cost > global_opts.cost_min_display || *cost < -global_opts.cost_min_display {
             println!(
@@ -210,11 +233,12 @@ fn print_summary(
     }
     if cnt > 0 {
         println!(
-            "     Total #{cnt} {cost_type} filtered cost {cur} {total}",
+            "     Total #{cnt} {cost_type} filtered cost {cur} {total} unreserved {cur} {total_unreserved}",
             cost_type = cost_type.as_str(),
             cur = cur,
             // total = (total as i64).to_formatted_string(&Locale::en).bold(),
             total = f64_to_currency(total, 2).bold(),
+            total_unreserved = f64_to_currency(total_unreserved, 2).bold(),
         );
         println!("     {color_legend}");
     }

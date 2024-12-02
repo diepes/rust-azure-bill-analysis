@@ -86,6 +86,7 @@ fn main() {
                 app.subscription,
                 app.meter_category,
                 app.resource_region,
+                app.reservation,
                 app.tag_summarize,
                 app.tag_filter,
                 latest_bill,

@@ -1,10 +1,11 @@
 /// This module contains summary data structures derived from bills.
 /// see bill/calc/summary.rs for actual implementation.
-/// 
+///
 use crate::bill::costtype::CostType;
 pub struct CostTotal {
     pub cost: f64,
     pub source: CostSource,
+    pub cost_unreserved: f64,
 }
 
 // set copy trait for CostTotal

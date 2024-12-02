@@ -27,12 +27,12 @@ pub struct BillEntry {
     pub meter_name: String,         // e.g. "Intra-Region Ingress"
     pub meter_region: String,
     pub quantity: f64,
-    pub effective_price: f64,
+    pub effective_price: f64, // blended rate across tiers, actual rate, could be 0 for reservations
     pub cost: f64,
     // BillingCurrency
     pub billing_currency: String,
     // UnitPrice,TotalUsedSavings,TotalUnused
-    pub unit_price: f64,
+    pub unit_price: f64, // per-unit price at time of billing inc. negotiated discounts
     pub reservation_name: String,
     pub resource_id: String,
     pub resource_name: String,
@@ -95,7 +95,11 @@ impl BillEntry {
         let mut lines = 0;
         for result in reader.deserialize() {
             if result.is_err() {
-                println!("Error parsing line #{} in file {}", lines,file_path.display());
+                println!(
+                    "Error parsing line #{} in file {}",
+                    lines,
+                    file_path.display()
+                );
             }
             let mut bill: BillEntry = result?;
             if !global_opts.case_sensitive {
