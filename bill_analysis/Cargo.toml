@@ -1,6 +1,6 @@
 [package]
 name = "bill_analysis"
-version = "0.1.3-20241202"
+version = "0.1.4-20241205"
 edition = "2021"
 
 [dependencies]

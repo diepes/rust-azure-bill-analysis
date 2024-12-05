@@ -79,6 +79,7 @@ pub fn display_cost_by_filter(
                 .entry(prev_key.clone())
                 .and_modify(|cost_total| {
                     cost_total.cost -= prev_cost_total.cost;
+                    cost_total.cost_unreserved -= prev_cost_total.cost_unreserved;
                     cost_total.source = CostSource::Combined;
                 })
                 .or_insert(CostTotal {
