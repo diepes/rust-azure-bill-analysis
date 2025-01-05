@@ -17,6 +17,7 @@ Rust tool to summarize Detailed Azure bill
 
        cd bill_analysis
        cargo run --release --
+       cargo run --release -- --bill-path "./csv_data/202411"
        # current bill - older bill
        cargo run --release -- --bill-prev-subtract-path ./csv_data/*202410*.csv
        #
@@ -70,7 +71,7 @@ watch
     * Quantity(Hr) x EffectivePrice = Cost = 0 if reserved
     * Quantity(Hr) x UnitPrice => What_the_cost_would_have_been
     * MeterName
-    * MeterCategory = ["Virtual machines", "SQL Managed Instance", "Azure App Service"]
+    * MeterCategory = ["Virtual Machines", "SQL Managed Instance", "Azure App Service"]
     * MeterSubCategory = ["Dv2/DSv2 Series","Managed Instance General Purpose - Compute Gen5", "Premium Plan"]
     * Date = "dd/mm/yyyy" (Day for the bill entry, 32 for the month)
     * One entry per day per VM for Quantity = 24(Hr)

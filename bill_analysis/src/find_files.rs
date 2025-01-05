@@ -2,8 +2,14 @@ use regex::Regex; // Add this line to import the `Regex` struct from the `regex`
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::cmd_parse::GlobalOpts;
+
 /// split path and search folder for files matching the path.file_name() or if not present with file_re_pattern
-pub fn in_folder(path: &Path, file_re_pattern: &str) -> (PathBuf, Vec<String>) {
+pub fn in_folder(
+    path: &Path,
+    file_re_pattern: &str,
+    global_opts: &GlobalOpts,
+) -> (PathBuf, Vec<String>) {
     let mut files = Vec::new();
     // extract the folder or set to ./(current folder)
     let folder;
@@ -34,7 +40,9 @@ pub fn in_folder(path: &Path, file_re_pattern: &str) -> (PathBuf, Vec<String>) {
             if re.is_match(file_name) {
                 files.push(file_name.to_string());
             }
-            // println!("Debug path: {:?} {}", folder, file_name);
+            if global_opts.debug {
+                println!("Debug path: {:?} {}", folder, file_name);
+            };
         }
     }
     // sort the files before returning
@@ -45,10 +53,22 @@ pub fn in_folder(path: &Path, file_re_pattern: &str) -> (PathBuf, Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    static GLOBAL_OPTS: GlobalOpts = GlobalOpts {
+        debug: false,
+        bill_path: None,
+        bill_prev_subtract_path: None,
+        cost_min_display: 0.0,
+        case_sensitive: true,
+        tag_list: false,
+    };
 
     #[test]
     fn test_find_files_dir() {
-        let (path, files) = in_folder(&PathBuf::from("tests"), r"azure_test_.*_01.csv");
+        let (path, files) = in_folder(
+            &PathBuf::from("tests"),
+            r"azure_test_.*_01.csv",
+            &GLOBAL_OPTS,
+        );
         assert_eq!(path.to_str().unwrap(), "tests");
         assert_eq!(files.len(), 2);
         assert_eq!(files[0], "azure_test_data_01.csv");
@@ -59,6 +79,7 @@ mod tests {
         let (path, files) = in_folder(
             &PathBuf::from("./tests/azure_test_disks_02.txt"),
             r"azure_test_.*_01.csv",
+            &GLOBAL_OPTS,
         );
         assert_eq!(path.to_str().unwrap(), "./tests");
         assert_eq!(files.len(), 1);
@@ -66,7 +87,11 @@ mod tests {
     }
     #[test]
     fn test_find_file_match_part() {
-        let (path, files) = in_folder(&PathBuf::from("./tests/disks_02"), r"azure_test_.*_01.csv");
+        let (path, files) = in_folder(
+            &PathBuf::from("./tests/disks_02"),
+            r"azure_test_.*_01.csv",
+            &GLOBAL_OPTS,
+        );
         assert_eq!(path.to_str().unwrap(), "./tests");
         assert_eq!(files.len(), 1);
         assert_eq!(files[0], "azure_test_disks_02.txt");

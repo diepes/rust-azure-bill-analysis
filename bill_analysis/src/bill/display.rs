@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use colored::Colorize;
 
 use super::bills::Bills;
@@ -118,12 +120,6 @@ pub fn display_cost_by_filter(
         println!()
     }
 
-    // print Reservation bill details
-    if !s_reservation.is_empty() {
-        print_summary(&bill_summary, &cur, CostType::Reservation, global_opts);
-        println!()
-    }
-
     // print Tag bill details
     if !s_tag_s.is_empty() {
         println!("## Tag details {} '{}'", s_tag_s, display_date);
@@ -146,6 +142,87 @@ pub fn display_cost_by_filter(
             latest_bill.tag_names.len(),
             latest_bill.tag_names
         );
+    }
+
+    // print Reservation bill details
+    if !s_reservation.is_empty() {
+        print_summary(&bill_summary, &cur, CostType::Reservation, global_opts);
+        println!();
+
+        println!();
+        println!("Reservations:");
+        let mut unique_key = HashSet::new();
+        for (key, _day) in bill_summary.reservations.keys() {
+            unique_key.insert(key.clone());
+        }
+        for key in unique_key {
+            println!("{} '{}'", "Reservation key:".blue(), key.blue());
+            let mut res_cost_savings = 0.0;
+            let mut res_cost_unused = 0.0;
+            let mut res_cost_full = 0.0;
+            let mut res_compare_days = "".to_string();
+            for day in 1..=31 {
+                if let Some(reservation) = bill_summary.reservations.get(&(key.clone(), day)) {
+                    let mut rn = reservation
+                        .reservation_names
+                        .iter()
+                        .map(|s| *s)
+                        .collect::<Vec<&str>>();
+                    rn.sort();
+                    let rn = rn.join(", ").blue();
+                    let rvmr = reservation.vm_names_reserved.join(", ").green();
+                    let rvmnr = reservation.vm_names_not_reserved.join(", ").red();
+                    let res_compare_days_new = format!("{rn}{rvmr}{rvmnr}");
+                    if res_compare_days_new != res_compare_days { // only print if different
+                        res_compare_days = res_compare_days_new;
+                        println!(
+                        "Res: Day:{d}, key:'{key}' Save:{rcs:.2} Unused:{rcu:.2} FullCost:{cf:.2} ResName:[{rn}]\n     VMsRes:[{rvmr}]\n     VMsNotRes:[{rvmnr}]",
+                        d=day,
+                        rcs=reservation.cost_savings,
+                        rcu=reservation.cost_unused,
+                        cf=reservation.cost_full,
+                        key=key.red(),
+                    );
+                    };
+                    res_cost_savings += reservation.cost_savings;
+                    res_cost_unused += reservation.cost_unused;
+                    res_cost_full += reservation.cost_full;
+                }
+            }
+            println!("    Month Total: Save:{rcs:.2} Unused:{rcu:.2} FullCost:{cf:.2} Saving:{saving_pct} key:'{key}' ",
+            rcs=res_cost_savings,
+            rcu=res_cost_unused,
+            cf=res_cost_full,
+            key=key.red(),
+            saving_pct=format!("{:.0}%",res_cost_savings/(res_cost_full + res_cost_unused)*100.0).green(),
+        );
+        }
+        // if *day == 1 || true {
+        //     println!(
+        //         "  Reservation benefit: {} - day {} - {}",
+        //         res_name, day, reservation.meter_category
+        //     );
+        //     println!("    Cost: {}", f64_to_currency(reservation.cost_full, 2));
+        //     println!(
+        //         "    Savings: {}",
+        //         f64_to_currency(reservation.cost_savings, 2)
+        //     );
+        //     println!("    Hours: {}", reservation.hr_total);
+        //     println!("    Savings Hours: {}", reservation.hr_saving);
+        //     println!("    Unused reservation: Day:{} {}", day, reservation.cost_unused);
+        //     println!(
+        //         "    Reservations: {}",
+        //         reservation
+        //             .reservation_names
+        //             .iter()
+        //             .map(|s| s.as_str())
+        //             .collect::<Vec<&str>>()
+        //             .join(", "),
+        //     );
+        //     println!("    VM Names: #{}", reservation.vm_names.len());
+        //     println!(" Reservation # {}", bill_summary.reservations.len());
+        // }
+        // }
     }
 }
 
@@ -209,12 +286,16 @@ fn print_summary(
         let savings = *cost_unreserved - *cost;
         let cur_savings = f64_to_currency(savings, 2);
         let part1 = format!("{cur} {currency:>11}");
-        let part2 = if savings > 1.0 { format!("+{cur_savings:>9}") } else { "".to_string() };
+        let part2 = if savings > 1.0 {
+            format!("+{cur_savings:>9}")
+        } else {
+            "".to_string()
+        };
 
         let color_cost = match source {
-            CostSource::Original => format!("{} {:>11}",part1.red(),part2.yellow()),
-            CostSource::Secondary => format!("{} {:>11}",part1.green(),part2.yellow()),
-            CostSource::Combined => format!("{} {:>11}",part1.blue(),part2.yellow()),
+            CostSource::Original => format!("{} {:>11}", part1.red(), part2.yellow()),
+            CostSource::Secondary => format!("{} {:>11}", part1.green(), part2.yellow()),
+            CostSource::Combined => format!("{} {:>11}", part1.blue(), part2.yellow()),
         };
         if *cost > global_opts.cost_min_display || *cost < -global_opts.cost_min_display {
             println!(
@@ -234,12 +315,13 @@ fn print_summary(
     }
     if cnt > 0 {
         println!(
-            "     Total #{cnt} {cost_type} filtered cost {cur} {total} unreserved {cur} {total_unreserved}",
+            "     Total #{cnt} {cost_type} filtered cost {cur} {total} unreserved {cur} {total_unreserved}, savings {cur} {resrv_savings}",
             cost_type = cost_type.as_str(),
             cur = cur,
             // total = (total as i64).to_formatted_string(&Locale::en).bold(),
-            total = f64_to_currency(total, 2).bold(),
+            total = f64_to_currency(total, 2).red(),
             total_unreserved = f64_to_currency(total_unreserved, 2).bold(),
+            resrv_savings = f64_to_currency(total_unreserved - total, 2).yellow(),
         );
         println!("     {color_legend}");
     }

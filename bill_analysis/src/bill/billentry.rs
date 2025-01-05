@@ -43,12 +43,15 @@ pub struct BillEntry {
     pub plan_name: String,
     pub charge_type: String,
     pub frequency: String,
+    pub pricing_model: String,
     // benefitId,benefitName
     #[serde(rename = "benefitId")]
     pub benefit_id: String,
     #[serde(rename = "benefitName")]
     pub benefit_name: String,
     pub tags: Tags,
+    #[serde(skip_deserializing)]
+    pub line_number_csv: usize, // line number in csv file, added for debugging
 }
 
 // Apply the macro to specify which fields are subject to lowercasing
@@ -92,12 +95,13 @@ impl BillEntry {
             .into_string()
             .expect("Could not convert path to string ?");
         bills.file_short_name = extract_date_from_file_name(&bills.file_name);
-        let mut lines = 0;
-        for result in reader.deserialize() {
+        let mut line_number: usize = 0;
+        for (line, result) in reader.deserialize().enumerate() {
+            line_number = line + 2; // 1-based line number + header
             if result.is_err() {
                 println!(
                     "Error parsing line #{} in file {}",
-                    lines,
+                    line_number,
                     file_path.display()
                 );
             }
@@ -106,21 +110,26 @@ impl BillEntry {
                 bill.lowercase_all_strings();
             }
             // handle empty RG - probably purchase
+            // PLAN:{pn}__ChargeTYPE:{ct}__CSV:{ln}__
+            // pn=bill.plan_name.replace(' ', "-"),
+            // ct=bill.charge_type,
+            // ln=line_number,
             if bill.resource_group.is_empty() {
                 bill.resource_group = format!(
-                    "BUY_{}_{}_{}",
-                    bill.publisher_name.replace(' ', "-"),
-                    bill.plan_name.replace(' ', "-"),
-                    bill.charge_type
+                    "EMPTY_RG__PUBL:{pubn}__MCat:{mc}__MSubCat:{msc}",
+                    pubn = bill.publisher_name.replace(' ', "-"),
+                    mc = bill.meter_category.replace(' ', "_"),
+                    msc = bill.meter_sub_category.replace(' ', "_"),
                 );
             }
+            bill.line_number_csv = line_number;
+            // record global tags
             bills.tag_names.extend(bill.tags.kv.keys().cloned());
             bills.push(bill);
-            lines += 1;
         }
         bills.set_billing_currency()?;
         println!(
-            "parse_csv {lines} lines in {:.3}s",
+            "parse_csv {line_number} lines in {:.3}s",
             start.elapsed().as_secs_f64()
         );
 

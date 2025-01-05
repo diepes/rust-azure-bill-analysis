@@ -5,7 +5,7 @@ use regex::{Regex, RegexBuilder};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 
-use super::billsummary::SummaryData;
+use super::billsummary::{ReservationInfo, SummaryData};
 
 pub struct Bills {
     pub bills: Vec<BillEntry>,
@@ -176,6 +176,29 @@ impl Bills {
                 // if all match
                 // record cost against resource_name, resource_group, subscription_name, meter_category, tag
                 let cost_unreserved = bill.unit_price * bill.quantity;
+                if bill.meter_name == "RoundingAdjustment" {
+                    assert!( bill.effective_price < 2.0,
+                        "RoundingAdjustment cost too high ${} ResName:'{}' date:{} RG:'{}' line_csv:{}",
+                        bill.effective_price, bill.resource_name, bill.date, bill.resource_group, bill.line_number_csv,
+                    );
+                } else if bill.meter_name == "Unassigned" { // MeterName: "Unassigned" software market place purchases
+                    assert_eq!(
+                        bill.effective_price, 0.0,
+                        "Unassigned cost not zero ${} ResName:'{}' date:{} RG:'{}' line_csv:{}",
+                        bill.cost, bill.resource_name, bill.date, bill.resource_group, bill.line_number_csv,
+                    );
+                } else {
+                    assert_eq!(
+                        (bill.cost * 1000.0).round(),
+                        (bill.effective_price * bill.quantity * 1000.0).round(),
+                        "effective_price mismatch ResName:'{}' date:{} RG:'{}' line_csv:{}",
+                        bill.resource_name,
+                        bill.date,
+                        bill.resource_group,
+                        bill.line_number_csv,
+                    );
+                };
+
                 summary_data
                     .per_type
                     .entry((CostType::ResourceName, bill.resource_name.clone()))
@@ -278,8 +301,73 @@ impl Bills {
                                 source: CostSource::Original,
                             });
                     }
-                }
+                } // end tag_summarize
 
+                if [
+                    "Virtual Machines",
+                    "SQL Managed Instance",
+                    "Azure App Service",
+                ]
+                .iter()
+                .any(|&x| x == bill.meter_category)
+                {
+                    // add to reservation summary
+                    let savings = cost_unreserved - bill.cost;
+                    if savings < -0.0001 && bill.charge_type != "UnusedReservation" {
+                        println!(
+                            "Over charge cost > unitprice*quantity:{} Name:{} RG:{} cost_unreserverd:{}, ChargeType:{}, LineCSV:{}",
+                            savings,
+                            bill.resource_name,
+                            bill.resource_name,
+                            cost_unreserved,
+                            bill.charge_type,
+                            bill.line_number_csv,
+                        );
+                    };
+                    // assert!(bill.reservation_name != "", "No reservation name meter_category:{}, ChargeType:{}, LineCSV:{}",
+                    //     bill.meter_category,
+                    //     bill.charge_type,
+                    //     bill.line_number_csv,
+                    // );
+                    summary_data
+                        .reservations
+                        .entry((
+                            // TODO: make meter_sub_category complex, add MeterCategory, MeterSubCategory, MeterName and MeterRegion
+                            bill.meter_sub_category.clone(), // flex type e.g. "Dav4/Dasv4 Series"
+                            bill.date[3..5].parse().expect(
+                                format!("Invalid date expected fmt mm/dd/yyyy {}", bill.date)
+                                    .as_str(),
+                            ),
+                        ))
+                        .and_modify(|e| {
+                            e.cost_full += cost_unreserved;
+                            e.cost_savings += savings;
+                            e.hr_saving += if savings > 0.01 { bill.quantity } else { 0.0 };
+                            e.hr_total += bill.quantity;
+                            if bill.pricing_model == "Reservation" {
+                                e.cost_unused += if bill.charge_type == "UnusedReservation" {
+                                    bill.cost
+                                } else { 0.00 };
+                                e.reservation_names.insert(&bill.reservation_name);
+                                e.vm_names_reserved.push(&bill.resource_name);
+                            } else {
+                                e.vm_names_not_reserved.push(&bill.resource_name);
+                            }
+                        })
+                        .or_insert(ReservationInfo {
+                            cost_full: cost_unreserved,
+                            cost_savings: savings,
+                            hr_total: bill.quantity,
+                            hr_saving: if savings > 0.01 { bill.quantity } else { 0.0 },
+                            cost_unused: if bill.charge_type == "UnusedReservation" {
+                                bill.cost
+                            } else { 0.00 },
+                            reservation_names: if bill.reservation_name != "" { let mut rn = HashSet::<&str>::new(); rn.insert(&bill.reservation_name); rn } else { HashSet::new() },
+                            vm_names_reserved: if bill.pricing_model == "Reservation" { vec![&bill.resource_name] } else { Vec::new() },
+                            vm_names_not_reserved: if bill.pricing_model != "Reservation" { vec![&bill.resource_name] } else { Vec::new() },
+                            meter_category: bill.meter_category.clone(),
+                        });
+                }
                 summary_data.details.insert(format!(
                     "{rg}_____{rn}_____{mc}",
                     rg = bill.resource_group.clone(),
@@ -290,8 +378,9 @@ impl Bills {
             } else {
                 acc
             }
-        });
-        // bill_details should have same cost total for each category
+        }); // end loop through bill entries
+            //
+            // bill_details should have same cost total for each category
         summary_data.filtered_cost_total = filtered_total;
         summary_data
     }
