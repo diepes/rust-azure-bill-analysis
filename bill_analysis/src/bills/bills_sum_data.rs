@@ -1,7 +1,7 @@
 /// This module contains summary data structures derived from bills.
 /// see bill/calc/summary.rs for actual implementation.
 ///
-use crate::bill::costtype::CostType;
+use crate::bills::cost_type_enum::CostType;
 pub struct CostTotal {
     pub cost: f64,
     pub source: CostSource,

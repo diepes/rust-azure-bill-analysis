@@ -1,99 +1,14 @@
-use crate::bill::billentry::BillEntry;
-use crate::bill::billsummary::{CostSource, CostTotal};
-use crate::bill::costtype::CostType;
-use regex::{Regex, RegexBuilder};
-use std::collections::{HashMap, HashSet};
-use std::error::Error;
+use std::collections::HashSet;
+use crate::bills::bills_struct::Bills;
 
-use super::billsummary::{ReservationInfo, SummaryData};
+use crate::bills::bills_sum_data::{CostSource, CostTotal};
+use crate::bills::cost_type_enum::CostType;
+// use crate::bills::ReservationInfo;
+use crate::bills::bills_sum_data::{SummaryData, ReservationInfo};
+use regex::RegexBuilder;
 use crate::RESERVATION_SUMMARY; // lib.rs static RESERVATION_SUMMARY
 
-pub struct Bills {
-    pub bills: Vec<BillEntry>,
-    pub billing_currency: Option<String>,
-    pub tag_names: HashSet<String>,
-    pub file_name: String,
-    pub file_short_name: String,
-}
-impl Default for Bills {
-    fn default() -> Self {
-        Self {
-            bills: Vec::new(),
-            billing_currency: None,
-            tag_names: HashSet::new(),
-            file_name: "NotSet".to_string(),
-            file_short_name: "NotSet".to_string(),
-        }
-    }
-}
 impl Bills {
-    pub fn remove(&mut self, other: Bills) {
-        // ToDo: Probaly faulty, only drops matching values.
-        //       Move logic into summary to use both bills.
-        // create HashMap from other.bills to use as lookup from self.bills
-        let b2: HashMap<&BillEntry, ()> = HashMap::from_iter(other.bills.iter().map(|b| (b, ())));
-        // retain only the bills that are not in other.bills(b2) using hash lookup
-        self.bills.retain(|x| !b2.contains_key(x));
-    }
-
-    pub fn total_no_reservation(&self) -> f64 {
-        self.bills
-            .iter()
-            .fold(0.0, |acc, bill| acc + bill.unit_price * bill.quantity)
-    }
-    pub fn total_effective(&self) -> f64 {
-        self.bills
-            .iter()
-            .fold(0.0, |acc, bill| acc + bill.effective_price * bill.quantity)
-    }
-    // Function to calculte the total savings
-    // https://learn.microsoft.com/en-us/azure/cost-management-billing/reservations/calculate-ea-reservations-savings
-    pub fn total_used_savings(&self) -> f64 {
-        self.bills.iter().fold(0.0, |acc, bill| {
-            if !bill.reservation_name.is_empty() && bill.charge_type == "Usage" {
-                acc + (bill.unit_price - bill.effective_price) * bill.quantity
-                // assert_eq!(bill.pricing_model, "Reservation", "pricing_model mismatch");
-            } else {
-                acc
-            }
-        })
-    }
-    pub fn total_unused_savings(&self) -> f64 {
-        // In the billing data there is a charge_type "UnusedReservation" for every "date" and reservation.
-        self.bills.iter().fold(0.0, |acc, bill| {
-            if bill.charge_type == "UnusedSavingsPlan" || bill.charge_type == "UnusedReservation" {
-                acc + bill.effective_price * bill.quantity
-            } else {
-                acc
-            }
-        })
-    }
-    // Function to calculte the savings for meter_category
-    // benefit_name != "" && charge_type == "Usage" && meter_category == Input then sum the (unit_price - effective_price) * quantity for each bill
-    pub fn savings(&self, meter_category: &str) -> f64 {
-        self.bills.iter().fold(0.0, |acc, bill| {
-            if !bill.benefit_name.is_empty()
-                && bill.charge_type == "Usage"
-                && bill.meter_category == meter_category
-            {
-                acc + (bill.unit_price - bill.effective_price) * bill.quantity
-            } else {
-                acc
-            }
-        })
-    }
-    // filter cost for specific resource e.g. disk
-    pub fn cost_by_resource_name(&self, resource_name: &str) -> f64 {
-        self.bills.iter().fold(0.0, |acc, bill| {
-            // bill.subscription_name == resource_group &&
-            if bill.resource_name == resource_name {
-                acc + bill.cost
-            } else {
-                acc
-            }
-        })
-    }
-
     // function cost_by_any
     // takes name_regex, rg_regex, subs_regex, meter_category, tag_regex and returns total where all match,
     //   if empty str in input it is skiped for filter.
@@ -401,57 +316,9 @@ impl Bills {
         summary_data
     }
 
-    /// Similar to cost_by_resource_group, for cost_by_subscription
-    /// returns the total cost of all bills in the subscription and a set of all subscription names matched.
-    pub fn cost_by_subscription(
-        &self,
-        subscription_name: &str,
-    ) -> (f64, std::collections::HashSet<String>) {
-        let re_subs = Regex::new(subscription_name).unwrap();
-        // collect set of resource groups in set rgs
-        let mut subs = std::collections::HashSet::new();
-        let bill = self.bills.iter().fold(0.0, |acc, bill| {
-            if re_subs.is_match(&bill.subscription_name) {
-                subs.insert(bill.subscription_name.clone());
-                acc + bill.cost
-            } else {
-                acc
-            }
-        });
-        (bill, subs)
-    }
 
-    pub fn len(&self) -> usize {
-        self.bills.len()
-    }
 
-    pub fn is_empty(&self) -> bool {
-        self.bills.is_empty()
-    }
-
-    pub fn push(&mut self, bill: BillEntry) {
-        self.bills.push(bill);
-    }
-
-    // Function to get the BillingCurrency by ensuring all BillingCurrency fields are the same and saving the value in Option<billing_currency>
-    pub fn set_billing_currency(&mut self) -> Result<String, Box<dyn Error>> {
-        if self.billing_currency.is_some() {
-            Ok(self.billing_currency.as_ref().unwrap().clone())
-        } else {
-            let currency = &self.bills[0].billing_currency;
-            for bill in &self.bills {
-                if &bill.billing_currency != currency {
-                    return Err("Billing Currency mismatch".into());
-                }
-            }
-            self.billing_currency = Some(currency.clone());
-            Ok(currency.clone())
-        }
-    }
-
-    pub fn get_billing_currency(&self) -> String {
-        self.billing_currency.as_ref().unwrap().clone()
-    }
+ 
 }
 
 #[cfg(test)]
@@ -460,7 +327,8 @@ mod tests {
 
     use crate::cmd_parse::GlobalOpts;
 
-    use super::*;
+    // use super::*;
+    use crate::bills::bill_entry::BillEntry;
 
     static GLOBAL_OPTS: GlobalOpts = crate::GlobalOpts {
         debug: false,

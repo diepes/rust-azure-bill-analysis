@@ -2,10 +2,10 @@ use std::collections::HashSet;
 
 use colored::Colorize;
 
-use super::bills::Bills;
-use super::billsummary;
-use crate::bill::billsummary::{CostSource, CostTotal};
-use crate::bill::costtype::CostType;
+use crate::bills::Bills;
+// use super::bills_sum_data;
+use crate::bills::bills_sum_data::{CostSource, CostTotal, SummaryData};
+use crate::bills::cost_type_enum::CostType;
 use crate::cmd_parse::GlobalOpts;
 use crate::f64_to_currency;
 
@@ -234,7 +234,7 @@ pub fn display_cost_by_filter(
 
 fn sort_calc_total<'a>(
     //bill_details: &'a std::collections::HashMap<(CostType, String), CostTotal>,
-    bill_details: &'a billsummary::SummaryData,
+    bill_details: &'a SummaryData,
     cost_type: &CostType,
 ) -> (f64, f64, i32, Vec<(f64, f64, &'a str, CostSource)>) {
     let mut total = 0.0;
@@ -265,7 +265,7 @@ fn sort_calc_total<'a>(
 
 /// print_summary for Subscription, ResourceGroup, ResourceName, MeterCategory
 fn print_summary(
-    bill_summary: &billsummary::SummaryData,
+    bill_summary: &SummaryData,
     cur: &str,
     cost_type: CostType,
     global_opts: &GlobalOpts,

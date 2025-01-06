@@ -1,7 +1,7 @@
 // use bill_analysis::az_disk::{AzDisk, AzDisks};
 // use bill_analysis::bill::{BillEntry, Bills};
 //use bill_analysis::cmd_parse::App;
-use bill_analysis::bill;
+use bill_analysis::bills;
 use bill_analysis::cmd_parse::Commands;
 use clap::Parser; // Add this line to import the `Parser` trait from the `clap` crate
 
@@ -20,7 +20,7 @@ fn main() {
         Some(Commands::BillSummary(args)) => {
             println!("Running BillSummary command {:?}", args);
             // bill_analysis::calc_bill_summary(&bill_path, &app.global_opts);
-            bill::calc::summary::summary(&bill_path, &app.global_opts);
+            bills::summary::summary(&bill_path, &app.global_opts);
         }
         Some(Commands::DiskCsvSavings(args)) => {
             bill_analysis::calc_disks_cost(
@@ -49,7 +49,7 @@ fn main() {
                 &app.global_opts,
             );
             // If set read previous bill and subtract it from latest bill
-            let previous_bill: Option<bill::bills::Bills> = if let Some(
+            let previous_bill: Option<bills::bills_struct::Bills> = if let Some(
                 ref bill_prev_subtract_path,
             ) =
                 app.global_opts.bill_prev_subtract_path
@@ -80,7 +80,7 @@ fn main() {
             };
             // Display latest_bill ( - previous bill if set)
             // using regex filters if set
-            bill_analysis::bill::display::display_cost_by_filter(
+            bill_analysis::bills::display::display_cost_by_filter(
                 app.name_regex,
                 app.resource_group,
                 app.subscription,

@@ -1,7 +1,7 @@
 pub mod az_disk;
-pub mod bill;
-use bill::billentry::BillEntry;
-use bill::bills::Bills;
+pub mod bills;
+use bills::bill_entry::BillEntry;
+use bills::bills_struct::Bills;
 use colored::Colorize;
 pub mod cmd_parse;
 pub mod find_files;
