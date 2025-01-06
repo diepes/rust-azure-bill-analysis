@@ -5,9 +5,20 @@ use bill::bills::Bills;
 use colored::Colorize;
 pub mod cmd_parse;
 pub mod find_files;
-use std::path::{Path, PathBuf};
+use std::{collections::HashMap, path::{Path, PathBuf}};
 
 use cmd_parse::GlobalOpts;
+
+use once_cell::sync::Lazy;
+static RESERVATION_SUMMARY: Lazy<HashMap<&'static str, Vec<&'static str>>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+        // k = meter_category to include, v = meter_sub_category to exclude
+        m.insert("Virtual Machines", vec![]);
+        m.insert("SQL Managed Instance", vec!["Storage",]);
+        m.insert("Azure App Service", vec![]);
+        m
+    }
+);
 
 // function calc_subscription_cost
 pub fn calc_subscription_cost(subscription: &str, file_or_folder: &Path, global_opts: &GlobalOpts) {

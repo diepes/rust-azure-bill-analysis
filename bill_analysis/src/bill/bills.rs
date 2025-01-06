@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 
 use super::billsummary::{ReservationInfo, SummaryData};
+use crate::RESERVATION_SUMMARY; // lib.rs static RESERVATION_SUMMARY
 
 pub struct Bills {
     pub bills: Vec<BillEntry>,
@@ -303,14 +304,29 @@ impl Bills {
                     }
                 } // end tag_summarize
 
-                if [
-                    "Virtual Machines",
-                    "SQL Managed Instance",
-                    "Azure App Service",
-                ]
-                .iter()
-                .any(|&x| x == bill.meter_category)
-                {
+                    summary_data
+                        .per_type
+                        .entry((CostType::MeterCategory, format!("{}__{}", bill.meter_category, bill.meter_sub_category)))
+                        .and_modify(|e| {
+                            e.cost += bill.cost;
+                            e.cost_unreserved += cost_unreserved;
+                        })
+                        .or_insert(CostTotal {
+                            cost: bill.cost,
+                            cost_unreserved: cost_unreserved,
+                            source: CostSource::Original,
+                        });
+
+
+                if RESERVATION_SUMMARY
+                    .iter()
+                    // check if unit_price > 0.0 to filter SQL Licence and storage at zero cost
+                    .any(|(k,v)| {
+                        *k == bill.meter_category &&
+                        bill.unit_price > 0.0 &&
+                        !v.iter().any(|rule| bill.meter_sub_category.contains(rule) )
+                    })
+                    {
                     // add to reservation summary
                     let savings = cost_unreserved - bill.cost;
                     if savings < -0.0001 && bill.charge_type != "UnusedReservation" {
@@ -333,7 +349,7 @@ impl Bills {
                         .reservations
                         .entry((
                             // TODO: make meter_sub_category complex, add MeterCategory, MeterSubCategory, MeterName and MeterRegion
-                            bill.meter_sub_category.clone(), // flex type e.g. "Dav4/Dasv4 Series"
+                            format!("MC:{}__MSubC:{}",bill.meter_category,bill.meter_sub_category), // flex type e.g. "Dav4/Dasv4 Series"
                             bill.date[3..5].parse().expect(
                                 format!("Invalid date expected fmt mm/dd/yyyy {}", bill.date)
                                     .as_str(),

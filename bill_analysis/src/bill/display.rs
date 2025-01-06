@@ -162,7 +162,8 @@ pub fn display_cost_by_filter(
             let mut res_cost_full = 0.0;
             let mut res_compare_days = "".to_string();
             for day in 1..=31 {
-                if let Some(reservation) = bill_summary.reservations.get(&(key.clone(), day)) {
+                if let Some(reservation) = bill_summary.reservations.get_mut(&(key.clone(), day)) {
+                    // get reservation names convert to vec and sort them
                     let mut rn = reservation
                         .reservation_names
                         .iter()
@@ -170,13 +171,18 @@ pub fn display_cost_by_filter(
                         .collect::<Vec<&str>>();
                     rn.sort();
                     let rn = rn.join(", ").blue();
+                    // get vm names and sort them
+                    reservation.vm_names_reserved.sort();
                     let rvmr = reservation.vm_names_reserved.join(", ").green();
+                    // get vm names not reserved and sort them
+                    reservation.vm_names_not_reserved.sort();
                     let rvmnr = reservation.vm_names_not_reserved.join(", ").red();
                     let res_compare_days_new = format!("{rn}{rvmr}{rvmnr}");
-                    if res_compare_days_new != res_compare_days { // only print if different
+                    if res_compare_days_new != res_compare_days {
+                        // only print if different
                         res_compare_days = res_compare_days_new;
                         println!(
-                        "Res: Day:{d}, key:'{key}' Save:{rcs:.2} Unused:{rcu:.2} FullCost:{cf:.2} ResName:[{rn}]\n     VMsRes:[{rvmr}]\n     VMsNotRes:[{rvmnr}]",
+                        "Res: Day:{d} Save:{rcs:.2} Unused:{rcu:.2} FullCost:{cf:.2} , key:'{key}'\n     ResName:[{rn}]\n     VMsRes:[{rvmr}]\n     VMsNotRes:[{rvmnr}]",
                         d=day,
                         rcs=reservation.cost_savings,
                         rcu=reservation.cost_unused,
