@@ -21,7 +21,7 @@ impl Bills {
         rg_regex: &str,
         subs_regex: &str,
         meter_category: &str,
-        region_regex: &str,
+        location_regex: &str,
         reservation_regex: &str,
         tag_summarize: &str,
         tag_filter: &str,
@@ -43,10 +43,10 @@ impl Bills {
             .case_insensitive(!global_opts.case_sensitive)
             .build()
             .expect("Invalid regex for meter category");
-        let re_region = RegexBuilder::new(region_regex)
+        let re_location = RegexBuilder::new(location_regex)
             .case_insensitive(!global_opts.case_sensitive)
             .build()
-            .expect("Invalid regex for region");
+            .expect("Invalid regex for location/region");
         let re_reservation = RegexBuilder::new(reservation_regex)
             .case_insensitive(!global_opts.case_sensitive)
             .build()
@@ -77,14 +77,17 @@ impl Bills {
             {
                 flag_match = false;
             } else if match (
-                region_regex,
-                re_region.is_match(&bill.meter_region),
-                bill.meter_region.len(),
+                location_regex,
+                location_regex.len(),
+                re_location.is_match(&bill.resource_location),
+                bill.resource_location.len(),
             ) {
-                ("any", _, _) => false,
-                ("", _, 1..) => true,
-                (_, true, _) => false,
-                (_, false, _) => true,
+                ("any" , _, _    , _) => false, // any(default) any region ok, leave flag_match unchanged
+                ("all" , _, _    , _) => false, // any(default) any region ok, leave flag_match unchanged
+                ("none", _, _    , 1..) => true, // empty region. if value set for resource_location, set to false to skip
+                (_, _, true, _) => false, // if location_regex set and match, leave unchanged
+                //(_    , 1.., _  , 0) => false, // if location_regex set(len>0) and resource_location not set , set to false to skip
+                (_     , _, false, _) => true, // if location_regex set and no match, set to false to skip
             } {
                 flag_match = false;
             }
@@ -170,6 +173,20 @@ impl Bills {
                 summary_data
                     .per_type
                     .entry((CostType::Reservation, bill.benefit_name.clone()))
+                    .and_modify(|e| {
+                        e.cost += bill.cost;
+                        e.cost_unreserved += cost_unreserved;
+                    })
+                    .or_insert(CostTotal {
+                        cost: bill.cost,
+                        cost_unreserved: cost_unreserved,
+                        source: CostSource::Original,
+                    });
+
+                    let region = if bill.resource_location.is_empty() { "none" } else { &bill.resource_location };
+                    summary_data
+                    .per_type
+                    .entry((CostType::Region, region.to_string()))
                     .and_modify(|e| {
                         e.cost += bill.cost;
                         e.cost_unreserved += cost_unreserved;

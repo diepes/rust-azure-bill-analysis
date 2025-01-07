@@ -85,7 +85,7 @@ fn main() {
                 app.resource_group,
                 app.subscription,
                 app.meter_category,
-                app.resource_region,
+                app.location,
                 app.reservation,
                 app.tag_summarize,
                 app.tag_filter,

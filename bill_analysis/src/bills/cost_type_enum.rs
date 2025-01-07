@@ -6,6 +6,7 @@ pub enum CostType {
     MeterCategory,
     Tag,
     Reservation,
+    Region, //Location
 }
 impl CostType {
     pub fn as_str(&self) -> &str {
@@ -16,6 +17,7 @@ impl CostType {
             CostType::MeterCategory => "MeterCategory",
             CostType::Tag => "Tag",
             CostType::Reservation => "Reservation",
+            CostType::Region => "Region",
         }
     }
     // short name 3 char
@@ -27,6 +29,7 @@ impl CostType {
             CostType::MeterCategory => "Meter",
             CostType::Tag => "Tag",
             CostType::Reservation => "Resrv",
+            CostType::Region => "Loc",
         }
     }
 }

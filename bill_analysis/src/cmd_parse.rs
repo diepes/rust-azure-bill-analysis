@@ -31,9 +31,9 @@ pub struct App {
     /// regex find to filter on lowercase tag's
     #[arg(long)]
     pub tag_filter: Option<String>,
-    /// regex find to filter on resource_region terminate with '$' e.g. "Australia East"
+    /// regex find to filter on region/location terminate with '$' e.g. "Australia East" also "any" & "none" valid.
     #[arg(long)]
-    pub resource_region: Option<String>,
+    pub location: Option<String>,
     #[arg(long)]
     /// regex to filter on benefit name"
     pub reservation: Option<String>,

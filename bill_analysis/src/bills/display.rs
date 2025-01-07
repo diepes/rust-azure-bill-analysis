@@ -17,7 +17,7 @@ pub fn display_cost_by_filter(
     rg_r: Option<String>,
     sub_r: Option<String>,
     cat_r: Option<String>,
-    region_r: Option<String>,
+    location_r: Option<String>,
     reservation_r: Option<String>,
     tag_summarize: Option<String>,
     tag_filter: Option<String>,
@@ -28,7 +28,7 @@ pub fn display_cost_by_filter(
     global_opts: &GlobalOpts,
 ) {
     println!();
-    println!("Filter Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}, tag_r:{tag_filter:?}, tag_s:{tag_summarize:?}, region_r:{region_r:?}, reservation_r:{reservation_r:?}.\n");
+    println!("Filter Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}, tag_r:{tag_filter:?}, tag_s:{tag_summarize:?}, location_r:{location_r:?}, reservation_r:{reservation_r:?}.\n");
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
     // and print the cost
     let cur = latest_bill.get_billing_currency();
@@ -36,7 +36,7 @@ pub fn display_cost_by_filter(
     let s_rg = rg_r.unwrap_or("".to_string());
     let s_sub = sub_r.unwrap_or("".to_string());
     let s_cat = cat_r.unwrap_or("".to_string());
-    let s_region = region_r.unwrap_or("any".to_string()); // allow for capture of empty region
+    let s_location = location_r.unwrap_or("any".to_string()); // allow for capture of empty location
     let s_reservation = reservation_r.unwrap_or("".to_string());
     let s_tag_s = tag_summarize.clone().unwrap_or("".to_string());
     let s_tag_r = tag_filter.unwrap_or("".to_string());
@@ -47,7 +47,7 @@ pub fn display_cost_by_filter(
         &s_rg,
         &s_sub,
         &s_cat,
-        &s_region,
+        &s_location,
         &s_reservation,
         &s_tag_s,
         &s_tag_r,
@@ -66,7 +66,7 @@ pub fn display_cost_by_filter(
             &s_rg,
             &s_sub,
             &s_cat,
-            &s_region,
+            &s_location,
             &s_reservation,
             &s_tag_s,
             &s_tag_r,
@@ -101,6 +101,11 @@ pub fn display_cost_by_filter(
         }
     }
 
+    // print Region bill details
+    println!("## Location bill details {} '{}'", s_location, display_date);
+    print_summary(&bill_summary, &cur, CostType::Region, global_opts);
+    println!();
+
     // print Subscription bill details
     println!("## Subscription bill details {} '{}'", s_sub, display_date);
     print_summary(&bill_summary, &cur, CostType::Subscription, global_opts);
@@ -128,11 +133,11 @@ pub fn display_cost_by_filter(
     }
 
     println!(
-        "Total cost {cur} {total_cost}  date:'{display_date}' Region:'{s_region}'",
+        "Total cost {cur} {total_cost}  date:'{display_date}' Region:'{s_location}'",
         cur = cur,
         total_cost = f64_to_currency(total_cost, 2).bold(),
         display_date = display_date,
-        s_region = s_region,
+        s_location = s_location,
     );
 
     if global_opts.tag_list {
@@ -285,8 +290,10 @@ fn print_summary(
             yellow = "Yellow=ReservationSavings".yellow(),
         )
     };
+    let mut cost_double_check = 0.0;
     // print sorted Vec by cost
     for (cost, cost_unreserved, name, source) in bill_details_sorted.iter() {
+        cost_double_check += *cost_unreserved;
         let currency = f64_to_currency(*cost, 2);
         let _cur_unreserved = f64_to_currency(*cost_unreserved, 2);
         let savings = *cost_unreserved - *cost;
@@ -320,14 +327,16 @@ fn print_summary(
         );
     }
     if cnt > 0 {
+        let cost_err = total_unreserved - cost_double_check;
         println!(
-            "     Total #{cnt} {cost_type} filtered cost {cur} {total} unreserved {cur} {total_unreserved}, savings {cur} {resrv_savings}",
+            "     Total #{cnt} {cost_type} filtered cost {cur} {total} unreserved {cur} {total_unreserved}, savings {cur} {resrv_savings} {cost_err}",
             cost_type = cost_type.as_str(),
             cur = cur,
             // total = (total as i64).to_formatted_string(&Locale::en).bold(),
             total = f64_to_currency(total, 2).red(),
             total_unreserved = f64_to_currency(total_unreserved, 2).bold(),
             resrv_savings = f64_to_currency(total_unreserved - total, 2).yellow(),
+            cost_err = if cost_err.abs() < 0.001 { "".red() } else { format!("CostError: {:.2}",cost_err).red().bold() },
         );
         println!("     {color_legend}");
     }
