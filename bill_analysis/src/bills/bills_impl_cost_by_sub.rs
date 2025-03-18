@@ -1,11 +1,10 @@
-
 //use std::collections::{HashMap, HashSet};
 //use crate::bills::bill_entry::BillEntry;
 use crate::bills::bills_struct::Bills;
 use regex::Regex;
 
 impl Bills {
-     /// Similar to cost_by_resource_group, for cost_by_subscription
+    /// Similar to cost_by_resource_group, for cost_by_subscription
     /// returns the total cost of all bills in the subscription and a set of all subscription names matched.
     pub fn cost_by_subscription(
         &self,

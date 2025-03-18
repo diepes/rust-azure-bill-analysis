@@ -116,11 +116,22 @@ pub fn display_cost_by_filter(
     println!();
     // print Resource bill details
     if !s_name.is_empty() {
+        println!("## ResourceName bill details {} '{}'", s_rg, display_date);
         print_summary(&bill_summary, &cur, CostType::ResourceName, global_opts);
     }
 
-    // print Category bill details
+    // print MeterSubCategory bill details
     if !s_cat.is_empty() {
+        println!(
+            "## MeterSubCategory bill details {} '{}'",
+            s_rg, display_date
+        );
+        print_summary(&bill_summary, &cur, CostType::MeterSubCategory, global_opts);
+        println!()
+    }
+    // print MeterCategory bill details
+    if !s_cat.is_empty() {
+        println!("## MeterCategory bill details {} '{}'", s_rg, display_date);
         print_summary(&bill_summary, &cur, CostType::MeterCategory, global_opts);
         println!()
     }
@@ -269,6 +280,7 @@ fn sort_calc_total<'a>(
 }
 
 /// print_summary for Subscription, ResourceGroup, ResourceName, MeterCategory
+/// called for each summary section to print the cost details
 fn print_summary(
     bill_summary: &SummaryData,
     cur: &str,

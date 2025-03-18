@@ -4,6 +4,7 @@ pub enum CostType {
     ResourceGroup,
     Subscription,
     MeterCategory,
+    MeterSubCategory,
     Tag,
     Reservation,
     Region, //Location
@@ -15,6 +16,7 @@ impl CostType {
             CostType::ResourceGroup => "ResourceGroup",
             CostType::Subscription => "Subscription",
             CostType::MeterCategory => "MeterCategory",
+            CostType::MeterSubCategory => "MeterSubCategory",
             CostType::Tag => "Tag",
             CostType::Reservation => "Reservation",
             CostType::Region => "Region",
@@ -27,6 +29,7 @@ impl CostType {
             CostType::ResourceGroup => "Rg",
             CostType::Subscription => "Sub",
             CostType::MeterCategory => "Meter",
+            CostType::MeterSubCategory => "MeterSub",
             CostType::Tag => "Tag",
             CostType::Reservation => "Resrv",
             CostType::Region => "Loc",

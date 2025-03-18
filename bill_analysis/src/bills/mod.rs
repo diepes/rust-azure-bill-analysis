@@ -1,15 +1,15 @@
 // bill/mod.rs
 
 pub mod bill_entry;
-pub mod bills_struct;
 pub mod bills_impl_basic;
-pub mod bills_impl_currency;
-pub mod bills_impl_cost_by_sub;
 pub mod bills_impl_cost_by_any;
+pub mod bills_impl_cost_by_sub;
+pub mod bills_impl_currency;
+pub mod bills_struct;
 pub mod bills_sum_data;
-pub mod summary;
 pub mod cost_type_enum;
 pub mod display;
+pub mod summary;
 pub mod tags;
 
 use crate::bills::bills_struct::Bills;
@@ -17,12 +17,11 @@ use crate::bills::bills_struct::Bills;
 // use super::bills::bill_sum_data::{ReservationInfo, SummaryData};
 //use crate::RESERVATION_SUMMARY; // lib.rs static RESERVATION_SUMMARY
 
-
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-    use crate::cmd_parse::GlobalOpts;
     use crate::bills::bill_entry::BillEntry;
+    use crate::cmd_parse::GlobalOpts;
+    use std::path::PathBuf;
 
     // use super::*;
 

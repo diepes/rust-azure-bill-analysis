@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 // 1brc speedup
 use std::time::Instant;
 // pub mod calc;
-use crate::bills::Bills;
 use crate::bills::tags::Tags;
+use crate::bills::Bills;
 
 //struct to hold bill data for Azure detailed Enrollment csv parsed file
 #[derive(Debug, Deserialize)]

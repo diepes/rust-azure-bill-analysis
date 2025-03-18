@@ -1,12 +1,12 @@
-use std::collections::HashSet;
 use crate::bills::bills_struct::Bills;
+use std::collections::HashSet;
 
 use crate::bills::bills_sum_data::{CostSource, CostTotal};
 use crate::bills::cost_type_enum::CostType;
 // use crate::bills::ReservationInfo;
-use crate::bills::bills_sum_data::{SummaryData, ReservationInfo};
-use regex::RegexBuilder;
-use crate::RESERVATION_SUMMARY; // lib.rs static RESERVATION_SUMMARY
+use crate::bills::bills_sum_data::{ReservationInfo, SummaryData};
+use crate::RESERVATION_SUMMARY;
+use regex::RegexBuilder; // lib.rs static RESERVATION_SUMMARY
 
 impl Bills {
     // function cost_by_any
@@ -238,7 +238,7 @@ impl Bills {
 
                     summary_data
                         .per_type
-                        .entry((CostType::MeterCategory, format!("{}__{}", bill.meter_category, bill.meter_sub_category)))
+                        .entry((CostType::MeterSubCategory, format!("{}__{}", bill.meter_category, bill.meter_sub_category)))
                         .and_modify(|e| {
                             e.cost += bill.cost;
                             e.cost_unreserved += cost_unreserved;
@@ -332,10 +332,6 @@ impl Bills {
         summary_data.filtered_cost_total = filtered_total;
         summary_data
     }
-
-
-
- 
 }
 
 #[cfg(test)]

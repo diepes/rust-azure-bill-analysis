@@ -1,7 +1,6 @@
-
-use std::collections::HashMap;
 use crate::bills::bill_entry::BillEntry;
 use crate::bills::bills_struct::Bills;
+use std::collections::HashMap;
 
 impl Bills {
     pub fn remove(&mut self, other: Bills) {
@@ -71,7 +70,6 @@ impl Bills {
         })
     }
 
-
     pub fn len(&self) -> usize {
         self.bills.len()
     }
@@ -83,5 +81,4 @@ impl Bills {
     pub fn push(&mut self, bill: BillEntry) {
         self.bills.push(bill);
     }
-
 }
