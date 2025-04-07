@@ -95,10 +95,11 @@ pub fn display_cost_by_filter(
     }
 
     if !s_name.is_empty() {
-        println!(" details: len={}", bill_summary.details.len());
+        println!("## Name details: len={}", bill_summary.details.len());
         for d in bill_summary.details.iter() {
             println!(" details: {:?}", d);
         }
+        println!();
     }
 
     // print Region bill details
@@ -341,14 +342,14 @@ fn print_summary(
     if cnt > 0 {
         let cost_err = total_unreserved - cost_double_check;
         println!(
-            "     Total #{cnt} {cost_type} filtered cost {cur} {total} unreserved {cur} {total_unreserved}, savings {cur} {resrv_savings} {cost_err}",
+            "     Total #{cnt} {cost_type} filtered cost {cur} {total} + {cur} {resrv_savings} = {cur} {total_unreserved} Err:{cost_err}",
             cost_type = cost_type.as_str(),
             cur = cur,
             // total = (total as i64).to_formatted_string(&Locale::en).bold(),
-            total = f64_to_currency(total, 2).red(),
+            total = f64_to_currency(total, 2).red().bold(),
             total_unreserved = f64_to_currency(total_unreserved, 2).bold(),
             resrv_savings = f64_to_currency(total_unreserved - total, 2).yellow(),
-            cost_err = if cost_err.abs() < 0.001 { "".red() } else { format!("CostError: {:.2}",cost_err).red().bold() },
+            cost_err = if cost_err.abs() < 0.001 { "-".red() } else { format!("CostError: {:.2}",cost_err).red().bold() },
         );
         println!("     {color_legend}");
     }

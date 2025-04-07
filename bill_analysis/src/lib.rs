@@ -95,12 +95,14 @@ pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts
         bills.file_short_name
     );
     let cur = bills.get_billing_currency();
-    println!("Total cost {cur} {t_cost}, no_reservation {cur} {t_no_reservation}, Unused Savings {cur} {t_unused_savings}, Used Savings {cur} {t_used_savings}",
-        t_cost = f64_to_currency(bills.total_effective(),2),
-        t_no_reservation = f64_to_currency(bills.total_no_reservation(),2),
-        t_unused_savings = f64_to_currency(bills.total_unused_savings(), 2).on_red(),
-        t_used_savings = f64_to_currency(bills.total_used_savings(), 2).on_green(),
+    println!("Total cost {cur} {t_cost}, no_reservation {cur} {t_no_reservation}, Savings# Unused: {cur} {t_unused_savings}, Used {cur} {t_used_savings}",
+        t_cost = f64_to_currency(bills.total_effective(),0).red().bold(),
+        t_no_reservation = f64_to_currency(bills.total_no_reservation(),0),
+        t_unused_savings = f64_to_currency(bills.total_unused_savings(), 0).on_red(),
+        t_used_savings = f64_to_currency(bills.total_used_savings(), 0).yellow(),
     );
+    // TODO: print filterd total cost
+
     let category = "Virtual Machines";
     println!(
         "Savings '{category}' {cur} {savings}",

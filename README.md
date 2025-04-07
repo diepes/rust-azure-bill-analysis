@@ -22,6 +22,7 @@ Rust tool to summarize Detailed Azure bill
        cargo run --release -- --bill-prev-subtract-path ./csv_data/*202410*.csv
        #
        cargo run --release -- --subscription "torpedo7" --bill-prev-subtract-path ./csv_data/*202409*.csv
+       cargo run --release -- --resource-group dev-tui-rg --meter-category ".*" --name-regex ".*"
        #
        ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv resource-price --subscription ".*7$" # Prod only
        #
@@ -75,3 +76,4 @@ watch
     * MeterSubCategory = ["Dv2/DSv2 Series","Managed Instance General Purpose - Compute Gen5", "Premium Plan"]
     * Date = "dd/mm/yyyy" (Day for the bill entry, 32 for the month)
     * One entry per day per VM for Quantity = 24(Hr)
+    * 2025-03 bill l:106258 ProductOrderName:"Compute savings plan, 1 Year" pricingModel:"SavingsPlan"

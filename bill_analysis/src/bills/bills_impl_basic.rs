@@ -37,9 +37,15 @@ impl Bills {
     pub fn total_unused_savings(&self) -> f64 {
         // In the billing data there is a charge_type "UnusedReservation" for every "date" and reservation.
         self.bills.iter().fold(0.0, |acc, bill| {
+            // bill.charge_type != "Usage"
             if bill.charge_type == "UnusedSavingsPlan" || bill.charge_type == "UnusedReservation" {
                 acc + bill.effective_price * bill.quantity
             } else {
+                assert_eq!(
+                    bill.charge_type, "Usage",
+                    "Unexpected charge_type {}",
+                    bill.charge_type
+                );
                 acc
             }
         })

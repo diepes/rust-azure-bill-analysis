@@ -92,19 +92,21 @@ impl Bills {
                 flag_match = false;
             }
             if flag_match {
-                // if all match
+                // if flag_match still true (no filter above excluded this bill) add to summary_data
                 // record cost against resource_name, resource_group, subscription_name, meter_category, tag
                 let cost_unreserved = bill.unit_price * bill.quantity;
+                // do some sanity checks / assert's
                 if bill.meter_name == "RoundingAdjustment" {
                     assert!( bill.effective_price < 2.0,
                         "RoundingAdjustment cost too high ${} ResName:'{}' date:{} RG:'{}' line_csv:{}",
                         bill.effective_price, bill.resource_name, bill.date, bill.resource_group, bill.line_number_csv,
                     );
                 } else if bill.meter_name == "Unassigned" { // MeterName: "Unassigned" software market place purchases
+                    // should be zero cost, look at actual unit cost x quantity
                     assert_eq!(
-                        bill.effective_price, 0.0,
-                        "Unassigned cost not zero ${} ResName:'{}' date:{} RG:'{}' line_csv:{}",
-                        bill.cost, bill.resource_name, bill.date, bill.resource_group, bill.line_number_csv,
+                        bill.effective_price * bill.quantity, 0.0,
+                        "Unassigned cost not zero ${} cost:${} ResName:'{}' date:{} RG:'{}' line_csv:{}",
+                        bill.effective_price, bill.cost, bill.resource_name, bill.date, bill.resource_group, bill.line_number_csv,
                     );
                 } else {
                     assert_eq!(
