@@ -40,12 +40,16 @@ impl Bills {
             // bill.charge_type != "Usage"
             if bill.charge_type == "UnusedSavingsPlan" || bill.charge_type == "UnusedReservation" {
                 acc + bill.effective_price * bill.quantity
-            } else {
-                assert_eq!(
-                    bill.charge_type, "Usage",
-                    "Unexpected charge_type {}",
-                    bill.charge_type
-                );
+            } else { // skip and check assertions
+                // Asset to catch unknown charge_type, we did find "Purchase" at $0, ignore.
+                if !(bill.effective_price == 0.0 && bill.unit_price == 0.0) {
+                    // assert bill.charge_type one of "Usage", "RoundingAdjustment"
+                    assert!(
+                        bill.charge_type == "Usage" || bill.charge_type == "RoundingAdjustment",
+                        "Unexpected charge_type '{}'",
+                        bill.charge_type
+                    );
+                };
                 acc
             }
         })

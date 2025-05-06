@@ -96,6 +96,8 @@ pub fn display_cost_by_filter(
 
     if !s_name.is_empty() {
         println!("## Name details: len={}", bill_summary.details.len());
+        // https://vscode.dev/github/diepes/rust-azure-bill-analysis/blob/main/bill_analysis/src/bills/bills_impl_cost_by_any.rs#L322
+        println!("## details: {{resource_group}}_____{{resource_name}}_____{{meter_category}}");
         for d in bill_summary.details.iter() {
             println!(" details: {:?}", d);
         }

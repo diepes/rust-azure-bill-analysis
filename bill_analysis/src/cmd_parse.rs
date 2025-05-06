@@ -31,7 +31,7 @@ pub struct App {
     /// regex find to filter on lowercase tag's
     #[arg(long)]
     pub tag_filter: Option<String>,
-    /// regex find to filter on region/location terminate with '$' e.g. "Australia East" also "any" & "none" valid.
+    /// regex find to filter on region/location terminate with '$' e.g. "AustraliaEast" also "any" & "none" valid.
     #[arg(long)]
     pub location: Option<String>,
     #[arg(long)]

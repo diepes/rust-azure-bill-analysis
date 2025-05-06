@@ -21,12 +21,10 @@ Rust tool to summarize Detailed Azure bill
        # current bill - older bill
        cargo run --release -- --bill-prev-subtract-path ./csv_data/*202410*.csv
        #
-       cargo run --release -- --subscription "torpedo7" --bill-prev-subtract-path ./csv_data/*202409*.csv
+       cargo run --release -- --subscription "torpedo7" --bill-prev-subtract-path ./csv_data/*202502*.csv
        cargo run --release -- --resource-group dev-tui-rg --meter-category ".*" --name-regex ".*"
        #
-       ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv resource-price --subscription ".*7$" # Prod only
        #
-       ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202405_en.csv resource-price --subscription ".*7.*Non-Prod"
        # All VM's in Nonprod subscription
        cargo run --release --   --meter-category "Virtual Machines" --subscription "non-"
        # No command
