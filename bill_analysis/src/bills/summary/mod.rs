@@ -33,10 +33,10 @@ pub fn summary(folder: &Path, global_opts: &GlobalOpts) {
             unused = bills.total_unused_savings(),
         );
         print!("Total Used Savings {:.2} {cur}", bills.total_used_savings());
-        let category = "Virtual Machines";
-        print!("Savings '{category}' {:.2} {cur}", bills.savings(category));
-        let category = "Azure App Service";
-        print!("Savings '{category}' {:.2} {cur}", bills.savings(category));
+        let meter_category = "Virtual Machines";
+        print!("Savings '{meter_category}' {:.2} {cur}", bills.savings(meter_category));
+        let meter_category = "Azure App Service";
+        print!("Savings '{meter_category}' {:.2} {cur}", bills.savings(meter_category));
         println!();
     }
 }

@@ -103,20 +103,15 @@ pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts
     );
     // TODO: print filterd total cost
 
-    let category = "Virtual Machines";
-    println!(
-        "Savings '{category}' {cur} {savings}",
-        category = category,
-        cur = cur,
-        savings = f64_to_currency(bills.savings(category), 2),
-    );
-    let category = "Azure App Service";
-    println!(
-        "Savings '{category}' {cur} {savings}",
-        category = category,
-        cur = cur,
-        savings = f64_to_currency(bills.savings(category), 2),
-    );
+    let categorys = ["Virtual Machines","Azure App Service"] ;
+    for meter_category in categorys {
+        println!(
+            "  Savings by meter_category:'{meter_category}' {cur} {savings}",
+            meter_category = meter_category,
+            cur = cur,
+            savings = f64_to_currency(bills.savings(meter_category), 2),
+        );
+    }
     println!();
 }
 
