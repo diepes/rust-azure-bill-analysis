@@ -4,6 +4,7 @@
 use bill_analysis::bills;
 use bill_analysis::cmd_parse::Commands;
 use clap::Parser; // Add this line to import the `Parser` trait from the `clap` crate
+// use bill_analysis::calc_bill_summary; // Import the function if it exists
 
 fn main() {
     let timer_run = std::time::Instant::now();
@@ -15,12 +16,13 @@ fn main() {
         //println!("Debug mode not activated {:?}", app.command);
         false
     };
-    let bill_path = app.global_opts.bill_path.clone().unwrap();
     match app.command {
         Some(Commands::BillSummary(args)) => {
             println!("Running BillSummary command {:?}", args);
             // bill_analysis::calc_bill_summary(&bill_path, &app.global_opts);
-            bills::summary::summary(&bill_path, &app.global_opts);
+            let bill_path = app.global_opts.bill_path.clone().unwrap();
+            let (mut latest_bill, _file_name) = bill_analysis::load_bill(&bill_path, &app.global_opts);
+            latest_bill.summary(&bill_path, &app.global_opts);
         }
         Some(Commands::DiskCsvSavings(args)) => {
             bill_analysis::calc_disks_cost(
@@ -38,10 +40,8 @@ fn main() {
                 println!("No command specified #2 {:?}", app.name_regex);
             }
             // Read latest_bill from file_name csv file.
-            let (latest_bill, file_name) = bill_analysis::load_bill(
-                &app.global_opts.bill_path.clone().unwrap(),
-                &app.global_opts,
-            );
+            let bill_path = app.global_opts.bill_path.clone().unwrap();
+            let (latest_bill, file_name) = bill_analysis::load_bill(&bill_path, &app.global_opts);
             println!("Loaded latest bill from '{:?}'", file_name);
             bill_analysis::display_total_cost_summary(
                 &latest_bill,
@@ -49,7 +49,7 @@ fn main() {
                 &app.global_opts,
             );
             // If set read previous bill and subtract it from latest bill
-            let previous_bill: Option<bills::bills_struct::Bills> = if let Some(
+            let previous_bill: Option<bills::Bills> = if let Some(
                 ref bill_prev_subtract_path,
             ) =
                 app.global_opts.bill_prev_subtract_path
@@ -87,7 +87,7 @@ fn main() {
                 app.meter_category,
                 app.location,
                 app.reservation,
-                app.tag_summarize,
+                app.tag_summarise,
                 app.tag_filter,
                 latest_bill,
                 previous_bill,

@@ -19,7 +19,7 @@ pub fn display_cost_by_filter(
     cat_r: Option<String>,
     location_r: Option<String>,
     reservation_r: Option<String>,
-    tag_summarize: Option<String>,
+    tag_summarise: Option<String>,
     tag_filter: Option<String>,
     // file_or_folder: PathBuf,
     latest_bill: Bills,
@@ -28,7 +28,7 @@ pub fn display_cost_by_filter(
     global_opts: &GlobalOpts,
 ) {
     println!();
-    println!("Filter Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}, tag_r:{tag_filter:?}, tag_s:{tag_summarize:?}, location_r:{location_r:?}, reservation_r:{reservation_r:?}.\n");
+    println!("Filter Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}, tag_r:{tag_filter:?}, tag_s:{tag_summarise:?}, location_r:{location_r:?}, reservation_r:{reservation_r:?}.\n");
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
     // and print the cost
     let cur = latest_bill.get_billing_currency();
@@ -38,7 +38,7 @@ pub fn display_cost_by_filter(
     let s_cat = cat_r.unwrap_or("".to_string());
     let s_location = location_r.unwrap_or("any".to_string()); // allow for capture of empty location
     let s_reservation = reservation_r.unwrap_or("".to_string());
-    let s_tag_s = tag_summarize.clone().unwrap_or("".to_string());
+    let s_tag_s = tag_summarise.clone().unwrap_or("".to_string());
     let s_tag_r = tag_filter.unwrap_or("".to_string());
     let mut display_date = latest_bill.file_short_name.clone();
 

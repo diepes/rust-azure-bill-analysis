@@ -33,7 +33,8 @@ Rust tool to summarize Detailed Azure bill
        ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202404_en.csv --resource-group="^MC"
        # Remove all previous month entries - only view new
        ./bill_analysis.rs --bill-path ./csv_data/Detail_Enrollment_70785102_202410_en.csv --bill-prev-subtract-path ./csv_data/Detail_Enrollment_70785102_202409_en.csv --resource-group ".*"
-       #
+       # Filter tags and display details for specific tag
+       cargo run --release -- --tag-filter "hours_of_operation=24\*7|24x7" --tag-summarise "hours_of_operation"
 
 ### Command resource-price
 

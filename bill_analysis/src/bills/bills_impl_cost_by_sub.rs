@@ -1,6 +1,6 @@
 //use std::collections::{HashMap, HashSet};
 //use crate::bills::bill_entry::BillEntry;
-use crate::bills::bills_struct::Bills;
+use crate::bills::Bills;
 use regex::Regex;
 
 impl Bills {

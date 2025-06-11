@@ -1,15 +1,10 @@
 use regex::Regex;
 use serde::Deserialize;
-use std::error::Error;
-use std::fs::File;
 use std::hash::Hash;
-use std::path::{Path, PathBuf};
 
 // 1brc speedup
-use std::time::Instant;
 // pub mod calc;
 use crate::bills::tags::Tags;
-use crate::bills::Bills;
 
 //struct to hold bill data for Azure detailed Enrollment csv parsed file
 #[derive(Debug, Deserialize)]
@@ -58,7 +53,7 @@ pub struct BillEntry {
 macro_rules! lowercase_all_strings {
     ($struct:ident, $($field:ident),*) => {
         impl $struct {
-            fn lowercase_all_strings(&mut self) {
+            pub fn lowercase_all_strings(&mut self) {
                 $(
                     self.$field = self.$field.to_lowercase();
                 )*
@@ -75,68 +70,7 @@ lowercase_all_strings!(
 );
 //
 
-impl BillEntry {
-    // Function to parse the CSV file and return a vector of BillEntry structs
-    pub fn parse_csv(
-        file_path: &PathBuf,
-        global_opts: &crate::GlobalOpts,
-    ) -> Result<Bills, Box<dyn Error>> {
-        let start = Instant::now();
-        let file = File::open(Path::new(file_path))?;
-        // 2024-06-23 tested mmap for faster read, no difference for 200k lines
-        //let mmap = unsafe { memmap::MmapOptions::new().map(&file).unwrap() };
-        //let mut reader = csv::Reader::from_reader(mmap.as_ref());
-        let mut reader = csv::Reader::from_reader(file);
-        let mut bills = Bills::default();
-        // set file name
-        bills.file_name = file_path
-            .clone()
-            .into_os_string()
-            .into_string()
-            .expect("Could not convert path to string ?");
-        bills.file_short_name = extract_date_from_file_name(&bills.file_name);
-        let mut line_number: usize = 0;
-        for (line, result) in reader.deserialize().enumerate() {
-            line_number = line + 2; // 1-based line number + header
-            if result.is_err() {
-                println!(
-                    "Error parsing line #{} in file {}",
-                    line_number,
-                    file_path.display()
-                );
-            }
-            let mut bill: BillEntry = result?;
-            if !global_opts.case_sensitive {
-                bill.lowercase_all_strings();
-            }
-            // handle empty RG - probably purchase
-            // PLAN:{pn}__ChargeTYPE:{ct}__CSV:{ln}__
-            // pn=bill.plan_name.replace(' ', "-"),
-            // ct=bill.charge_type,
-            // ln=line_number,
-            if bill.resource_group.is_empty() {
-                bill.resource_group = format!(
-                    "EMPTY_RG__PUBL:{pubn}__MCat:{mc}__MSubCat:{msc}",
-                    pubn = bill.publisher_name.replace(' ', "-"),
-                    mc = bill.meter_category.replace(' ', "_"),
-                    msc = bill.meter_sub_category.replace(' ', "_"),
-                );
-            }
-            bill.line_number_csv = line_number;
-            // record global tags
-            bills.tag_names.extend(bill.tags.kv.keys().cloned());
-            bills.push(bill);
-        }
-        bills.set_billing_currency()?;
-        println!(
-            "parse_csv {line_number} lines in {:.3}s",
-            start.elapsed().as_secs_f64()
-        );
-
-        Ok(bills)
-    }
-}
-fn extract_date_from_file_name(file_path: &str) -> String {
+pub fn extract_date_from_file_name(file_path: &str) -> String {
     // Define the regex pattern to match a date of the format _YYYYMM_
     let re = Regex::new(r"_(\d{6})_").unwrap();
 

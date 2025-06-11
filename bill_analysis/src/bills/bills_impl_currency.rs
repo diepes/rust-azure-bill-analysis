@@ -1,6 +1,6 @@
 // use std::collections::{HashMap, HashSet};
 // use crate::bills::bill_entry::BillEntry;
-use crate::bills::bills_struct::Bills;
+use crate::bills::Bills;
 use std::error::Error;
 
 impl Bills {
@@ -21,6 +21,16 @@ impl Bills {
     }
 
     pub fn get_billing_currency(&self) -> String {
-        self.billing_currency.as_ref().unwrap().clone()
+        let mut cur = self.billing_currency.as_ref().unwrap().clone();
+        if cur == "USD" {
+            cur = "US$".to_string();
+        }
+        if cur == "NZD" {
+            cur = "NZ$".to_string();
+        }
+        if cur == "AUD" {
+            cur = "AU$".to_string();
+        }
+        cur
     }
 }

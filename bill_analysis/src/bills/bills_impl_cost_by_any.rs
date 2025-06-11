@@ -1,11 +1,10 @@
-use crate::bills::bills_struct::Bills;
-use std::collections::HashSet;
+use crate::bills::Bills;
 
 use crate::bills::bills_sum_data::{CostSource, CostTotal};
 use crate::bills::cost_type_enum::CostType;
 // use crate::bills::ReservationInfo;
-use crate::bills::bills_sum_data::{ReservationInfo, SummaryData};
-use crate::RESERVATION_SUMMARY;
+use crate::bills::bills_sum_data::SummaryData;
+// use crate::RESERVATION_SUMMARY;
 use regex::RegexBuilder; // lib.rs static RESERVATION_SUMMARY
 
 impl Bills {
@@ -23,7 +22,7 @@ impl Bills {
         meter_category: &str,
         location_regex: &str,
         reservation_regex: &str,
-        tag_summarize: &str,
+        tag_summarise: &str,
         tag_filter: &str,
         global_opts: &crate::GlobalOpts,
     ) -> SummaryData {
@@ -200,14 +199,14 @@ impl Bills {
                     });
 
                 // add bill_details for tags, using the matched tag and value
-                if !tag_summarize.is_empty() {
+                if !tag_summarise.is_empty() {
                     let tag_summarize_lowercase = if global_opts.case_sensitive {
-                        tag_filter.to_string()
+                        tag_summarise.to_string()
                     } else {
-                        tag_summarize.to_lowercase()
+                        tag_summarise.to_lowercase()
                     };
                     if bill.tags.kv.contains_key(&tag_summarize_lowercase) {
-                        // from lowercase tag_summarize get the value and original key(Original case)
+                        // from lowercase tag_summarise get the value and original key(Original case)
                         let v = bill.tags.kv.get(&tag_summarize_lowercase).unwrap();
                         summary_data
                             .per_type
@@ -236,7 +235,7 @@ impl Bills {
                                 source: CostSource::Original,
                             });
                     }
-                } // end tag_summarize
+                } // end tag_summarise
 
                     summary_data
                         .per_type
@@ -251,73 +250,73 @@ impl Bills {
                             source: CostSource::Original,
                         });
 
-
-                if RESERVATION_SUMMARY
-                    .iter()
-                    // check if unit_price > 0.0 to filter SQL Licence and storage at zero cost
-                    .any(|(k,v)| {
-                        *k == bill.meter_category &&
-                        bill.unit_price > 0.0 &&
-                        !v.iter().any(|rule| bill.meter_sub_category.contains(rule) )
-                    })
-                    {
-                    // add to reservation summary
-                    let savings = cost_unreserved - bill.cost;
-                    if savings < -0.0001 && bill.charge_type != "UnusedReservation" {
-                        println!(
-                            "Over charge cost > unitprice*quantity:{} Name:{} RG:{} cost_unreserverd:{}, ChargeType:{}, LineCSV:{}",
-                            savings,
-                            bill.resource_name,
-                            bill.resource_name,
-                            cost_unreserved,
-                            bill.charge_type,
-                            bill.line_number_csv,
-                        );
-                    };
-                    // assert!(bill.reservation_name != "", "No reservation name meter_category:{}, ChargeType:{}, LineCSV:{}",
-                    //     bill.meter_category,
-                    //     bill.charge_type,
-                    //     bill.line_number_csv,
-                    // );
-                    summary_data
-                        .reservations
-                        .entry((
-                            // TODO: make meter_sub_category complex, add MeterCategory, MeterSubCategory, MeterName and MeterRegion
-                            format!("MC:{}__MSubC:{}",bill.meter_category,bill.meter_sub_category), // flex type e.g. "Dav4/Dasv4 Series"
-                            bill.date[3..5].parse().expect(
-                                format!("Invalid date expected fmt mm/dd/yyyy {}", bill.date)
-                                    .as_str(),
-                            ),
-                        ))
-                        .and_modify(|e| {
-                            e.cost_full += cost_unreserved;
-                            e.cost_savings += savings;
-                            e.hr_saving += if savings > 0.01 { bill.quantity } else { 0.0 };
-                            e.hr_total += bill.quantity;
-                            if bill.pricing_model == "Reservation" {
-                                e.cost_unused += if bill.charge_type == "UnusedReservation" {
-                                    bill.cost
-                                } else { 0.00 };
-                                e.reservation_names.insert(&bill.reservation_name);
-                                e.vm_names_reserved.push(&bill.resource_name);
-                            } else {
-                                e.vm_names_not_reserved.push(&bill.resource_name);
-                            }
-                        })
-                        .or_insert(ReservationInfo {
-                            cost_full: cost_unreserved,
-                            cost_savings: savings,
-                            hr_total: bill.quantity,
-                            hr_saving: if savings > 0.01 { bill.quantity } else { 0.0 },
-                            cost_unused: if bill.charge_type == "UnusedReservation" {
-                                bill.cost
-                            } else { 0.00 },
-                            reservation_names: if bill.reservation_name != "" { let mut rn = HashSet::<&str>::new(); rn.insert(&bill.reservation_name); rn } else { HashSet::new() },
-                            vm_names_reserved: if bill.pricing_model == "Reservation" { vec![&bill.resource_name] } else { Vec::new() },
-                            vm_names_not_reserved: if bill.pricing_model != "Reservation" { vec![&bill.resource_name] } else { Vec::new() },
-                            meter_category: bill.meter_category.clone(),
-                        });
-                }
+                // TODO: Add RESERVATION SUMMARY, struct added to Bills
+                // if RESERVATION_SUMMARY
+                //     .iter()
+                //     // check if unit_price > 0.0 to filter SQL Licence and storage at zero cost
+                //     .any(|(k,v)| {
+                //         *k == bill.meter_category &&
+                //         bill.unit_price > 0.0 &&
+                //         !v.iter().any(|rule| bill.meter_sub_category.contains(rule) )
+                //     })
+                //     {
+                //     // add to reservation summary
+                //     let savings = cost_unreserved - bill.cost;
+                //     if savings < -0.0001 && bill.charge_type != "UnusedReservation" {
+                //         println!(
+                //             "Over charge cost > unitprice*quantity:{} Name:{} RG:{} cost_unreserverd:{}, ChargeType:{}, LineCSV:{}",
+                //             savings,
+                //             bill.resource_name,
+                //             bill.resource_name,
+                //             cost_unreserved,
+                //             bill.charge_type,
+                //             bill.line_number_csv,
+                //         );
+                //     };
+                //     // assert!(bill.reservation_name != "", "No reservation name meter_category:{}, ChargeType:{}, LineCSV:{}",
+                //     //     bill.meter_category,
+                //     //     bill.charge_type,
+                //     //     bill.line_number_csv,
+                //     // );
+                //     summary_data
+                //         .reservations
+                //         .entry((
+                //             // TODO: make meter_sub_category complex, add MeterCategory, MeterSubCategory, MeterName and MeterRegion
+                //             format!("MC:{}__MSubC:{}",bill.meter_category,bill.meter_sub_category), // flex type e.g. "Dav4/Dasv4 Series"
+                //             bill.date[3..5].parse().expect(
+                //                 format!("Invalid date expected fmt mm/dd/yyyy {}", bill.date)
+                //                     .as_str(),
+                //             ),
+                //         ))
+                //         .and_modify(|e| {
+                //             e.cost_full += cost_unreserved;
+                //             e.cost_savings += savings;
+                //             e.hr_saving += if savings > 0.01 { bill.quantity } else { 0.0 };
+                //             e.hr_total += bill.quantity;
+                //             if bill.pricing_model == "Reservation" {
+                //                 e.cost_unused += if bill.charge_type == "UnusedReservation" {
+                //                     bill.cost
+                //                 } else { 0.00 };
+                //                 e.reservation_names.insert(&bill.reservation_name);
+                //                 e.vm_names_reserved.push(&bill.resource_name);
+                //             } else {
+                //                 e.vm_names_not_reserved.push(&bill.resource_name);
+                //             }
+                //         })
+                //         .or_insert(ReservationInfo {
+                //             cost_full: cost_unreserved,
+                //             cost_savings: savings,
+                //             hr_total: bill.quantity,
+                //             hr_saving: if savings > 0.01 { bill.quantity } else { 0.0 },
+                //             cost_unused: if bill.charge_type == "UnusedReservation" {
+                //                 bill.cost
+                //             } else { 0.00 },
+                //             reservation_names: if bill.reservation_name != "" { let mut rn = HashSet::<&str>::new(); rn.insert(&bill.reservation_name); rn } else { HashSet::new() },
+                //             vm_names_reserved: if bill.pricing_model == "Reservation" { vec![&bill.resource_name] } else { Vec::new() },
+                //             vm_names_not_reserved: if bill.pricing_model != "Reservation" { vec![&bill.resource_name] } else { Vec::new() },
+                //             meter_category: bill.meter_category.clone(),
+                //         });
+                // }
                 summary_data.details.insert(format!(
                     "{rg}_____{rn}_____{mc}",
                     rg = bill.resource_group.clone(),
@@ -380,7 +379,8 @@ mod tests {
         let file_path = &file_name;
 
         // Parse the CSV file
-        let result = BillEntry::parse_csv(file_path, &global_opts);
+        let mut bills = Bills::default();
+        let bills::parse_csv(file_path, &global_opts);
 
         // Assert that parsing was successful
         assert!(
