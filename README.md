@@ -1,6 +1,7 @@
 # Overview
 
 Rust tool to summarize Detailed Azure bill
+Diagram - [Flow Diagram](flowchartTD.md) 
 
 ## Subcommands
 
@@ -17,9 +18,9 @@ Rust tool to summarize Detailed Azure bill
 
        cd bill_analysis
        cargo run --release --
-       cargo run --release -- --bill-path "./csv_data/202411"
+       cargo run --release -- --bill-path "./csv_data/202511"
        # current bill - older bill
-       cargo run --release -- --bill-prev-subtract-path ./csv_data/*202410*.csv
+       cargo run --release -- --bill-prev-subtract-path ./csv_data/*202510*.csv
        #
        cargo run --release -- --subscription "torpedo7" --bill-prev-subtract-path ./csv_data/*202502*.csv
        cargo run --release -- --resource-group dev-tui-rg --meter-category ".*" --name-regex ".*"
