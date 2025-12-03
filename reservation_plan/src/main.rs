@@ -123,6 +123,7 @@ fn print_summary(reservations: &[Reservation]) {
     let mut by_vm_type: HashMap<String, (u32, u32)> = HashMap::new(); // VM types breakdown
     let mut by_term: HashMap<String, u32> = HashMap::new();
     let mut by_expiry_month: HashMap<String, (u32, u32)> = HashMap::new(); // (units, reservation_count)
+    let mut by_expiry_month_3y: HashMap<String, (u32, u32)> = HashMap::new(); // 3-year term only
     let mut by_type_month: HashMap<(String, String), (u32, u32)> = HashMap::new(); // (resource_type, month) -> (units, count)
     let mut total_quantity = 0;
 
@@ -147,6 +148,15 @@ fn print_summary(reservations: &[Reservation]) {
                 .or_insert((0, 0));
             entry.0 += res.quantity; // units
             entry.1 += 1; // reservation count
+
+            // Track 3-year reservations separately
+            if res.term == "P3Y" {
+                let entry_3y = by_expiry_month_3y
+                    .entry(expiry_month.clone())
+                    .or_insert((0, 0));
+                entry_3y.0 += res.quantity;
+                entry_3y.1 += 1;
+            }
 
             // Also track by resource type and month
             let month = &expiry_month[5..7];
@@ -239,8 +249,8 @@ fn print_summary(reservations: &[Reservation]) {
         .unwrap_or(6);
     let label_width = max_len.max(6); // Minimum 6 characters
 
-    // First line: units/reservations with color based on units
-    print!("{:>width$}|", "", width = label_width);
+    // First line: ALL - total units/reservations with color based on units
+    print!("{:>width$}|", "ALL", width = label_width);
     for (_, units, count) in &ordered_months {
         let color = if *units < average_units as u32 {
             GREEN
@@ -258,7 +268,48 @@ fn print_summary(reservations: &[Reservation]) {
     }
     println!();
 
-    // Second line: month names
+    // Second line: 3year reservations
+    // Aggregate 3-year counts by month
+    let mut month_totals_3y: HashMap<String, (u32, u32)> = HashMap::new();
+    for (year_month, (units, count)) in by_expiry_month_3y.iter() {
+        let month = &year_month[5..7];
+        let entry = month_totals_3y.entry(month.to_string()).or_insert((0, 0));
+        entry.0 += units;
+        entry.1 += count;
+    }
+    
+    // Create ordered months for 3-year
+    let mut ordered_months_3y = Vec::new();
+    for i in 0..12 {
+        let month_num = ((current_month - 1 + i) % 12) + 1;
+        let month_str = format!("{:02}", month_num);
+        let (units, count) = month_totals_3y.get(&month_str).copied().unwrap_or((0, 0));
+        ordered_months_3y.push((month_str, units, count));
+    }
+    
+    // Calculate average for 3-year
+    let total_units_3y: u32 = ordered_months_3y.iter().map(|(_, units, _)| *units).sum();
+    let average_units_3y = total_units_3y as f64 / 12.0;
+    
+    print!("{:>width$}|", "3year", width = label_width);
+    for (_, units, count) in &ordered_months_3y {
+        let color = if *units < average_units_3y as u32 && *units > 0 {
+            GREEN
+        } else if *units > average_units_3y as u32 {
+            RED
+        } else {
+            RESET
+        };
+        let display = if *count > 0 {
+            format!("{}u/{}r", units, count)
+        } else {
+            "0".to_string()
+        };
+        print!("{}{:>7}{} |", color, display, RESET);
+    }
+    println!();
+
+    // Third line: month names
     print!("{:>width$}|", "", width = label_width);
     for (month, _, _) in &ordered_months {
         print!("{:>7} |", format_month(month));
