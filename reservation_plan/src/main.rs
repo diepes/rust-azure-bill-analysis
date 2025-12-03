@@ -2,7 +2,7 @@ mod reservation;
 
 use anyhow::Result;
 use chrono::Datelike;
-use reservation::{Reservation, fetch_all_reservations, fetch_all_reservations_force_refresh};
+use reservation::{Reservation, fetch_all_reservations, fetch_all_reservations_force_refresh, fetch_reservation_costs};
 
 fn main() -> Result<()> {
     // Check for --refresh or --force flag
@@ -32,6 +32,18 @@ fn main() -> Result<()> {
         fetch_all_reservations()?
     };
 
+    // Fetch costs from Cost Management API
+    println!("\nFetching reservation costs...");
+    let costs = fetch_reservation_costs().unwrap_or_else(|e| {
+        eprintln!("Warning: Failed to fetch costs: {}", e);
+        std::collections::HashMap::new()
+    });
+
+    // Attach costs to reservations
+    for res in &mut reservations {
+        res.monthly_cost = costs.get(&res.reservation_id).copied();
+    }
+
     // Filter out expired reservations unless --show-expired flag is set
     let total_count = reservations.len();
     if !show_expired {
@@ -53,11 +65,11 @@ fn main() -> Result<()> {
     println!("Saved to all_reservations.json\n");
 
     println!("\n\nDetailed Reservations:");
-    println!("{}", "=".repeat(160));
+    println!("{}", "=".repeat(180));
 
     // Print in table format
     println!(
-        "{:<10} {:<40} {:<25} {:<5} {:<15} {:<12} {:<12} {:<6} {:<10} {:<5}",
+        "{:<10} {:<40} {:<25} {:<5} {:<15} {:<12} {:<12} {:<6} {:<10} {:<5} {:<12}",
         "OrderId",
         "DisplayName",
         "SKU",
@@ -67,15 +79,20 @@ fn main() -> Result<()> {
         "Expiry",
         "Term",
         "State",
-        "Flex"
+        "Flex",
+        "Monthly Cost"
     );
-    println!("{}", "-".repeat(160));
+    println!("{}", "-".repeat(180));
 
     for res in &reservations {
         let order_id_short = &res.reservation_order_id[..8.min(res.reservation_order_id.len())];
         let flex = res.instance_flexibility.as_deref().unwrap_or("N/A");
+        let cost_str = match res.monthly_cost {
+            Some(cost) => format!("${:.2}", cost),
+            None => "N/A".to_string(),
+        };
         println!(
-            "{:<10} {:<40} {:<25} {:<5} {:<15} {:<12} {:<12} {:<6} {:<10} {:<5}",
+            "{:<10} {:<40} {:<25} {:<5} {:<15} {:<12} {:<12} {:<6} {:<10} {:<5} {:<12}",
             order_id_short,
             res.display_name,
             res.sku,
@@ -85,10 +102,11 @@ fn main() -> Result<()> {
             res.expiry_date,
             res.term,
             res.state,
-            flex
+            flex,
+            cost_str
         );
     }
-    println!("{}", "=".repeat(160));
+    println!("{}", "=".repeat(180));
     println!();
 
     // Print summary statistics
@@ -135,7 +153,7 @@ fn print_summary(reservations: &[Reservation]) {
 
         // For VirtualMachines, also track by VM type (SKU)
         if res.resource_type == "VirtualMachines" {
-            let vm_type_key = format!("VM-{}", res.sku);
+            let vm_type_key = format!("VM-{}", res.sku.to_lowercase());
             let vm_entry = by_vm_type.entry(vm_type_key).or_insert((0, 0));
             vm_entry.0 += res.quantity;
             vm_entry.1 += 1;

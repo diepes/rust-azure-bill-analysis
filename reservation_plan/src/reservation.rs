@@ -23,6 +23,8 @@ pub struct Reservation {
     pub resource_type: String,
     pub billing_plan: String,
     pub region: String,
+    #[serde(skip)]
+    pub monthly_cost: Option<f64>,
 }
 
 /// Fetch all reservations, using cache if available for current month
@@ -220,4 +222,75 @@ fn get_reservations_for_order(order_id: &str) -> Result<Vec<Reservation>> {
         serde_json::from_str(&stdout).context("Failed to parse JSON from az command")?;
 
     Ok(reservations)
+}
+
+/// Fetch reservation costs from Cost Management API for the Management subscription
+/// Returns a HashMap of ReservationId -> monthly cost
+pub fn fetch_reservation_costs() -> Result<std::collections::HashMap<String, f64>> {
+    const MANAGEMENT_SUBSCRIPTION_ID: &str = "5b74d5cd-8e57-4e60-b745-fb2d0c394320";
+    
+    let query_body = r#"{
+        "type": "ActualCost",
+        "timeframe": "MonthToDate",
+        "dataset": {
+            "granularity": "None",
+            "aggregation": {
+                "totalCost": {
+                    "name": "PreTaxCost",
+                    "function": "Sum"
+                }
+            },
+            "grouping": [
+                {"type": "Dimension", "name": "ReservationId"},
+                {"type": "Dimension", "name": "ReservationName"}
+            ]
+        }
+    }"#;
+
+    let uri = format!(
+        "https://management.azure.com/subscriptions/{}/providers/Microsoft.CostManagement/query?api-version=2023-11-01",
+        MANAGEMENT_SUBSCRIPTION_ID
+    );
+
+    println!("Fetching reservation costs from Cost Management API...");
+
+    let output = Command::new("az")
+        .args(&[
+            "rest",
+            "--method", "post",
+            "--uri", &uri,
+            "--body", query_body,
+        ])
+        .output()
+        .context("Failed to execute az rest command")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("Cost Management API query failed: {}", stderr);
+    }
+
+    let stdout = String::from_utf8(output.stdout)
+        .context("Failed to parse cost management output as UTF-8")?;
+
+    let response: serde_json::Value =
+        serde_json::from_str(&stdout).context("Failed to parse JSON from cost management API")?;
+
+    let mut costs = std::collections::HashMap::new();
+
+    // Parse the response structure
+    if let Some(rows) = response["properties"]["rows"].as_array() {
+        for row in rows {
+            if let Some(row_array) = row.as_array() {
+                if row_array.len() >= 2 {
+                    if let (Some(cost), Some(reservation_id)) = 
+                        (row_array[0].as_f64(), row_array[1].as_str()) {
+                        costs.insert(reservation_id.to_string(), cost);
+                    }
+                }
+            }
+        }
+    }
+
+    println!("Found costs for {} reservations", costs.len());
+    Ok(costs)
 }
