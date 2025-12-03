@@ -38,15 +38,19 @@ pub fn fetch_all_reservations_force_refresh() -> Result<Vec<Reservation>> {
 /// Internal function to fetch reservations with optional cache bypass
 fn fetch_all_reservations_internal(force_refresh: bool) -> Result<Vec<Reservation>> {
     let cache_file = get_cache_filename();
-    
+
     // Try to load from cache first (unless force refresh)
     if !force_refresh {
         if let Ok(cached_reservations) = load_from_cache(&cache_file) {
-            println!("Loaded {} reservations from cache: {}", cached_reservations.len(), cache_file);
+            println!(
+                "Loaded {} reservations from cache: {}",
+                cached_reservations.len(),
+                cache_file
+            );
             return Ok(cached_reservations);
         }
     }
-    
+
     // Cache miss or force refresh - fetch from Azure
     if force_refresh {
         println!("Bypassing cache, fetching from Azure...");
@@ -54,14 +58,18 @@ fn fetch_all_reservations_internal(force_refresh: bool) -> Result<Vec<Reservatio
         println!("Cache not found or invalid, fetching from Azure...");
     }
     let reservations = fetch_reservations_from_azure()?;
-    
+
     // Save to cache
     if let Err(e) = save_to_cache(&cache_file, &reservations) {
         eprintln!("Warning: Failed to save cache: {}", e);
     } else {
-        println!("Saved {} reservations to cache: {}", reservations.len(), cache_file);
+        println!(
+            "Saved {} reservations to cache: {}",
+            reservations.len(),
+            cache_file
+        );
     }
-    
+
     Ok(reservations)
 }
 
@@ -75,28 +83,26 @@ fn get_cache_filename() -> String {
 /// Load reservations from cache file
 fn load_from_cache(cache_file: &str) -> Result<Vec<Reservation>> {
     let path = Path::new(cache_file);
-    
+
     if !path.exists() {
         anyhow::bail!("Cache file does not exist");
     }
-    
-    let contents = fs::read_to_string(path)
-        .context("Failed to read cache file")?;
-    
-    let reservations: Vec<Reservation> = serde_json::from_str(&contents)
-        .context("Failed to parse cache file")?;
-    
+
+    let contents = fs::read_to_string(path).context("Failed to read cache file")?;
+
+    let reservations: Vec<Reservation> =
+        serde_json::from_str(&contents).context("Failed to parse cache file")?;
+
     Ok(reservations)
 }
 
 /// Save reservations to cache file
 fn save_to_cache(cache_file: &str, reservations: &[Reservation]) -> Result<()> {
-    let json = serde_json::to_string_pretty(reservations)
-        .context("Failed to serialize reservations")?;
-    
-    fs::write(cache_file, json)
-        .context("Failed to write cache file")?;
-    
+    let json =
+        serde_json::to_string_pretty(reservations).context("Failed to serialize reservations")?;
+
+    fs::write(cache_file, json).context("Failed to write cache file")?;
+
     Ok(())
 }
 
@@ -104,26 +110,34 @@ fn save_to_cache(cache_file: &str, reservations: &[Reservation]) -> Result<()> {
 fn fetch_reservations_from_azure() -> Result<Vec<Reservation>> {
     // Step 1: Get all reservation order IDs
     let order_ids = get_reservation_order_ids()?;
-    
+
     println!("Found {} reservation orders to process", order_ids.len());
-    
+
     let mut all_reservations = Vec::new();
-    
+
     // Step 2: For each order ID, get the detailed reservations
     for (i, order_id) in order_ids.iter().enumerate() {
-        eprint!("\rProcessing order {}/{}: {}...", i + 1, order_ids.len(), &order_id[..8.min(order_id.len())]);
-        
+        eprint!(
+            "\rProcessing order {}/{}: {}...",
+            i + 1,
+            order_ids.len(),
+            &order_id[..8.min(order_id.len())]
+        );
+
         match get_reservations_for_order(order_id) {
             Ok(mut reservations) => {
                 all_reservations.append(&mut reservations);
             }
             Err(e) => {
-                eprintln!("\nWarning: Failed to get reservations for order {}: {}", order_id, e);
+                eprintln!(
+                    "\nWarning: Failed to get reservations for order {}: {}",
+                    order_id, e
+                );
             }
         }
     }
     eprintln!(); // New line after progress
-    
+
     Ok(all_reservations)
 }
 
@@ -146,8 +160,8 @@ fn get_reservation_order_ids() -> Result<Vec<String>> {
         anyhow::bail!("az command failed: {}", stderr);
     }
 
-    let stdout = String::from_utf8(output.stdout)
-        .context("Failed to parse az command output as UTF-8")?;
+    let stdout =
+        String::from_utf8(output.stdout).context("Failed to parse az command output as UTF-8")?;
 
     let order_ids: Vec<String> = stdout
         .lines()
@@ -202,8 +216,8 @@ fn get_reservations_for_order(order_id: &str) -> Result<Vec<Reservation>> {
     let stdout = String::from_utf8(output.stdout)
         .context("Failed to parse reservation list output as UTF-8")?;
 
-    let reservations: Vec<Reservation> = serde_json::from_str(&stdout)
-        .context("Failed to parse JSON from az command")?;
+    let reservations: Vec<Reservation> =
+        serde_json::from_str(&stdout).context("Failed to parse JSON from az command")?;
 
     Ok(reservations)
 }
