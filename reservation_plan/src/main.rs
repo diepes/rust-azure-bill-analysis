@@ -264,7 +264,7 @@ fn print_summary(reservations: &[Reservation]) {
         } else {
             "0".to_string()
         };
-        print!("{}{:>7}{} |", color, display, RESET);
+        print!("{}{:>8}{} |", color, display, RESET);
     }
     println!();
 
@@ -305,14 +305,14 @@ fn print_summary(reservations: &[Reservation]) {
         } else {
             "0".to_string()
         };
-        print!("{}{:>7}{} |", color, display, RESET);
+        print!("{}{:>8}{} |", color, display, RESET);
     }
     println!();
 
     // Third line: month names
     print!("{:>width$}|", "", width = label_width);
     for (month, _, _) in &ordered_months {
-        print!("{:>7} |", format_month(month));
+        print!("{:>8} |", format_month(month));
     }
     println!();
 
@@ -349,7 +349,7 @@ fn print_summary(reservations: &[Reservation]) {
             } else {
                 "".to_string()
             };
-            print!("{}{:>7}{} |", color, display, RESET);
+            print!("{}{:>8}{} |", color, display, RESET);
         }
         println!();
     }
