@@ -21,7 +21,8 @@ fn main() {
             println!("Running BillSummary command {:?}", args);
             // bill_analysis::calc_bill_summary(&bill_path, &app.global_opts);
             let bill_path = app.global_opts.bill_path.clone().unwrap();
-            let (mut latest_bill, _file_name) = bill_analysis::load_bill(&bill_path, &app.global_opts);
+            let (mut latest_bill, _file_name) =
+                bill_analysis::load_bill(&bill_path, &app.global_opts);
             latest_bill.summary(&bill_path, &app.global_opts);
         }
         Some(Commands::DiskCsvSavings(args)) => {
@@ -49,9 +50,7 @@ fn main() {
                 &app.global_opts,
             );
             // If set read previous bill and subtract it from latest bill
-            let previous_bill: Option<bills::Bills> = if let Some(
-                ref bill_prev_subtract_path,
-            ) =
+            let previous_bill: Option<bills::Bills> = if let Some(ref bill_prev_subtract_path) =
                 app.global_opts.bill_prev_subtract_path
             {
                 let (prev_bill, prev_file_name) =

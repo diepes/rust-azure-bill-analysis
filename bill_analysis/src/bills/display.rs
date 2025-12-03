@@ -28,7 +28,9 @@ pub fn display_cost_by_filter(
     global_opts: &GlobalOpts,
 ) {
     println!();
-    println!("Filter Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}, tag_r:{tag_filter:?}, tag_s:{tag_summarise:?}, location_r:{location_r:?}, reservation_r:{reservation_r:?}.\n");
+    println!(
+        "Filter Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}, tag_r:{tag_filter:?}, tag_s:{tag_summarise:?}, location_r:{location_r:?}, reservation_r:{reservation_r:?}.\n"
+    );
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
     // and print the cost
     let cur = latest_bill.get_billing_currency();
@@ -201,26 +203,31 @@ pub fn display_cost_by_filter(
                         // only print if different
                         res_compare_days = res_compare_days_new;
                         println!(
-                        "Res: Day:{d} Save:{rcs:.2} Unused:{rcu:.2} FullCost:{cf:.2} , key:'{key}'\n     ResName:[{rn}]\n     VMsRes:[{rvmr}]\n     VMsNotRes:[{rvmnr}]",
-                        d=day,
-                        rcs=reservation.cost_savings,
-                        rcu=reservation.cost_unused,
-                        cf=reservation.cost_full,
-                        key=key.red(),
-                    );
+                            "Res: Day:{d} Save:{rcs:.2} Unused:{rcu:.2} FullCost:{cf:.2} , key:'{key}'\n     ResName:[{rn}]\n     VMsRes:[{rvmr}]\n     VMsNotRes:[{rvmnr}]",
+                            d = day,
+                            rcs = reservation.cost_savings,
+                            rcu = reservation.cost_unused,
+                            cf = reservation.cost_full,
+                            key = key.red(),
+                        );
                     };
                     res_cost_savings += reservation.cost_savings;
                     res_cost_unused += reservation.cost_unused;
                     res_cost_full += reservation.cost_full;
                 }
             }
-            println!("    Month Total: Save:{rcs:.2} Unused:{rcu:.2} FullCost:{cf:.2} Saving:{saving_pct} key:'{key}' ",
-            rcs=res_cost_savings,
-            rcu=res_cost_unused,
-            cf=res_cost_full,
-            key=key.red(),
-            saving_pct=format!("{:.0}%",res_cost_savings/(res_cost_full + res_cost_unused)*100.0).green(),
-        );
+            println!(
+                "    Month Total: Save:{rcs:.2} Unused:{rcu:.2} FullCost:{cf:.2} Saving:{saving_pct} key:'{key}' ",
+                rcs = res_cost_savings,
+                rcu = res_cost_unused,
+                cf = res_cost_full,
+                key = key.red(),
+                saving_pct = format!(
+                    "{:.0}%",
+                    res_cost_savings / (res_cost_full + res_cost_unused) * 100.0
+                )
+                .green(),
+            );
         }
         // if *day == 1 || true {
         //     println!(
@@ -351,7 +358,11 @@ fn print_summary(
             total = f64_to_currency(total, 2).red().bold(),
             total_unreserved = f64_to_currency(total_unreserved, 2).bold(),
             resrv_savings = f64_to_currency(total_unreserved - total, 2).yellow(),
-            cost_err = if cost_err.abs() < 0.001 { "-".red() } else { format!("CostError: {:.2}",cost_err).red().bold() },
+            cost_err = if cost_err.abs() < 0.001 {
+                "-".red()
+            } else {
+                format!("CostError: {:.2}", cost_err).red().bold()
+            },
         );
         println!("     {color_legend}");
     }

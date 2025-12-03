@@ -22,7 +22,10 @@ impl Bills {
             find_files::in_folder(folder, r"Detail_Enrollment_70785102_.*_en.csv", global_opts);
         println!("Found {:?} csv files.", files.len());
         // Collect file paths first to avoid borrowing self across loop iterations
-        let file_paths: Vec<_> = files.into_iter().map(|csv_file_name| path.join(csv_file_name)).collect();
+        let file_paths: Vec<_> = files
+            .into_iter()
+            .map(|csv_file_name| path.join(csv_file_name))
+            .collect();
         for file_path in file_paths {
             self.parse_csv(&file_path, global_opts)
                 .expect(&format!("Error parsing the file '{:?}'", file_path));
@@ -39,7 +42,9 @@ impl Bills {
                 self.total_no_reservation(),
                 self.total_effective(),
                 savings = self.total_no_reservation() - self.total_effective(),
-                save_percent = (self.total_no_reservation() - self.total_effective()) / self.total_no_reservation() * 100.0,
+                save_percent = (self.total_no_reservation() - self.total_effective())
+                    / self.total_no_reservation()
+                    * 100.0,
                 unused = self.total_unused_savings(),
             );
             print!("Total Used Savings {:.2} {cur}", self.total_used_savings());

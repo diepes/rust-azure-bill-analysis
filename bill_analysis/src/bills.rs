@@ -12,9 +12,9 @@ pub mod summary;
 pub mod tags;
 // use crate::bills::bills_struct::Bills;
 
-use crate::bills::bill_entry::extract_date_from_file_name;
 use crate::bills::bill_entry::BillEntry;
-use std::collections::{HashSet, HashMap};
+use crate::bills::bill_entry::extract_date_from_file_name;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -29,16 +29,13 @@ pub struct Bills {
     pub summary: summary::Summary,
 }
 
-
-
 impl Bills {
     // Function to parse the CSV file and return a vector of BillEntry structs
     pub fn parse_csv(
         &mut self,
         file_path: &PathBuf,
         global_opts: &crate::GlobalOpts,
-    ) -> Result<(), Box<dyn Error>>
-    {
+    ) -> Result<(), Box<dyn Error>> {
         let start = Instant::now();
         let file = File::open(Path::new(file_path))?;
         // 2024-06-23 tested mmap for faster read, no difference for 200k lines

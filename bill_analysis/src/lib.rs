@@ -37,10 +37,7 @@ pub fn calc_subscription_cost(subscription: &str, file_or_folder: &Path, global_
     println!("Total cost {cur} {total_cost:.2} subs:{:?}", subs);
 }
 
-fn load_latest_bill(
-    file_or_folder: &Path,
-    global_opts: &GlobalOpts,
-) -> (Bills, String) {
+fn load_latest_bill(file_or_folder: &Path, global_opts: &GlobalOpts) -> (Bills, String) {
     let file_bill: PathBuf = if file_or_folder.is_file() {
         file_or_folder.to_path_buf()
     } else {
@@ -106,12 +103,16 @@ pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts
     let c_sav_unused = f64_to_currency(t_sav_unused, 2);
     let t_effective = bills.total_effective();
     let t_no_reservation = bills.total_no_reservation();
-    println!("Total cost {cur} {c_cost} + res_save {cur} {c_sav_used} + res_unused {cur} {c_sav_unused} = no_reservation {cur} {c_no_reservation} + err {cur} {err}",
-        c_cost = f64_to_currency(t_effective,2).red().bold(),
-        c_no_reservation = f64_to_currency(t_no_reservation,2).bold(),
+    println!(
+        "Total cost {cur} {c_cost} + res_save {cur} {c_sav_used} + res_unused {cur} {c_sav_unused} = no_reservation {cur} {c_no_reservation} + err {cur} {err}",
+        c_cost = f64_to_currency(t_effective, 2).red().bold(),
+        c_no_reservation = f64_to_currency(t_no_reservation, 2).bold(),
         c_sav_unused = c_sav_unused.on_red(),
         c_sav_used = c_sav_used.yellow(),
-        err = f64_to_currency(t_effective + t_sav_used + t_sav_unused - t_no_reservation, 2),
+        err = f64_to_currency(
+            t_effective + t_sav_used + t_sav_unused - t_no_reservation,
+            2
+        ),
     );
     // TODO: print filtered total cost
 
@@ -132,7 +133,7 @@ pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts
         }
         println!(
             "  Savings by meter_category:{meter_category:>32} {cur} {savings:>10} and Unused {cur} {unused_savings:<8}",
-            meter_category = format!("'{}'",meter_category),
+            meter_category = format!("'{}'", meter_category),
             cur = cur,
             savings = c_savings.yellow(),
             unused_savings = c_unused_savings.red(),

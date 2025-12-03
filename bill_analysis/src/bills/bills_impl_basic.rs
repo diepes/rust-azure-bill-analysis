@@ -1,6 +1,6 @@
+use crate::bills::Bills;
 use crate::bills::bill_entry::BillEntry;
 use crate::bills::summary::Summary;
-use crate::bills::Bills;
 // use crate::bills::bills_struct::Bills;
 use std::collections::HashMap;
 
@@ -16,8 +16,7 @@ impl Bills {
         self.bills.retain(|x| !b2.contains_key(x));
     }
 
-    pub fn calc_all_totals(&mut self)
-    {
+    pub fn calc_all_totals(&mut self) {
         let mut total_cost = 0.0;
         let mut total_no_reservation = 0.0;
         let mut total_effective = 0.0;
@@ -48,12 +47,12 @@ impl Bills {
             } else {
                 // assert reservation_name is empty
                 assert!(
-                        bill.reservation_name.is_empty(),
-                        "calc savings_all_categories - Unexpected reservation_name:'{res}' charge_type:'{t}' category:'{cat}'",
-                        res = bill.reservation_name,
-                        t = bill.charge_type,
-                        cat = bill.meter_category,
-                    );
+                    bill.reservation_name.is_empty(),
+                    "calc savings_all_categories - Unexpected reservation_name:'{res}' charge_type:'{t}' category:'{cat}'",
+                    res = bill.reservation_name,
+                    t = bill.charge_type,
+                    cat = bill.meter_category,
+                );
             }
         }
         self.summary = Summary {

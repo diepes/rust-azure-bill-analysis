@@ -184,8 +184,8 @@ impl Bills {
                         source: CostSource::Original,
                     });
 
-                    let region = if bill.resource_location.is_empty() { "none" } else { &bill.resource_location };
-                    summary_data
+                let region = if bill.resource_location.is_empty() { "none" } else { &bill.resource_location };
+                summary_data
                     .per_type
                     .entry((CostType::Region, region.to_string()))
                     .and_modify(|e| {
@@ -328,8 +328,8 @@ impl Bills {
                 acc
             }
         }); // end loop through bill entries
-            //
-            // bill_details should have same cost total for each category
+        //
+        // bill_details should have same cost total for each category
         summary_data.filtered_cost_total = filtered_total;
         summary_data
     }
