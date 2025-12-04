@@ -23,6 +23,10 @@ fn main() -> Result<()> {
     let show_expired = args
         .iter()
         .any(|arg| arg == "--show-expired" || arg == "--show-expired-reservations");
+    
+    // Parse color threshold parameters
+    let cost_threshold = parse_threshold_arg(&args, "--cost-threshold", 4000.0);
+    let units_threshold = parse_threshold_arg(&args, "--units-threshold", 10.0);
 
     if force_refresh {
         println!("Force refresh enabled - bypassing cache");
@@ -156,7 +160,7 @@ fn main() -> Result<()> {
     println!();
 
     // Print summary statistics
-    print_summary(&reservations);
+    print_summary(&reservations, cost_threshold, units_threshold);
 
     Ok(())
 }
@@ -169,6 +173,8 @@ fn print_help() {
     println!("  -h, --help                        Show this help message");
     println!("  -f, --force, --refresh            Force refresh from Azure (bypass cache)");
     println!("  --show-expired-reservations       Include expired reservations in output");
+    println!("  --cost-threshold <value>          Cost variance threshold in $ (default: 4000)");
+    println!("  --units-threshold <value>         Units variance threshold (default: 10, uses average)");
     println!("\nDescription:");
     println!("  Fetches all active Azure reservations and displays summary information.");
     println!("  Results are cached in cache_reservations_YYYYMM.json for the current month.");
@@ -178,4 +184,15 @@ fn print_help() {
 
 fn is_expired(state: &str) -> bool {
     state.eq_ignore_ascii_case("Expired") || state.eq_ignore_ascii_case("Cancelled")
+}
+
+fn parse_threshold_arg(args: &[String], flag: &str, default: f64) -> f64 {
+    for i in 0..args.len() {
+        if args[i] == flag && i + 1 < args.len() {
+            if let Ok(value) = args[i + 1].parse::<f64>() {
+                return value;
+            }
+        }
+    }
+    default
 }

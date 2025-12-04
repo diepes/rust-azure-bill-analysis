@@ -2,7 +2,7 @@ use crate::reservation::Reservation;
 use std::collections::HashMap;
 use chrono::{Datelike, Local, NaiveDate};
 
-pub fn print_summary(reservations: &[Reservation]) {
+pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_threshold: f64) {
     let mut by_type: HashMap<String, (u32, u32, f64, Vec<u32>)> = HashMap::new(); // (total_quantity, reservation_count, monthly_cost, remaining_months_list)
     let mut by_vm_type: HashMap<String, (u32, u32, f64, Vec<u32>)> = HashMap::new(); // VM types breakdown with cost and remaining months
     let mut by_term: HashMap<String, u32> = HashMap::new();
@@ -186,11 +186,13 @@ pub fn print_summary(reservations: &[Reservation]) {
     println!();
 
     // Second line: ALL - total units/reservations with color based on units
+    let units_threshold_val = if units_threshold > 0.0 { units_threshold } else { 0.0 };
     print!("{:>width$}|", "ALL", width = label_width);
     for (_, units, count) in &ordered_months {
-        let color = if *units < average_units as u32 {
+        // Apply color coding even to zero/dash values
+        let color = if (*units as f64) < average_units - units_threshold_val {
             GREEN
-        } else if *units > average_units as u32 {
+        } else if (*units as f64) > average_units + units_threshold_val {
             RED
         } else {
             RESET
@@ -213,13 +215,15 @@ pub fn print_summary(reservations: &[Reservation]) {
     for (month, _, _) in &ordered_months {
         let cost = month_cost_totals.get(month).copied().unwrap_or(0.0);
         let color = if cost > 0.0 {
-            if cost < average_cost - 4000.0 {
+            if cost < average_cost - cost_threshold {
                 GREEN
-            } else if cost > average_cost + 4000.0 {
+            } else if cost > average_cost + cost_threshold {
                 RED
             } else {
                 RESET
             }
+        } else if average_cost > 0.0 {
+            GREEN  // Zero cost is below average when average > 0
         } else {
             RESET
         };
@@ -257,9 +261,10 @@ pub fn print_summary(reservations: &[Reservation]) {
     
     print!("{:>width$}|", "3year", width = label_width);
     for (_, units, count) in &ordered_months_3y {
-        let color = if *units < average_units_3y as u32 && *units > 0 {
+        // Apply color coding to zero/dash values with threshold
+        let color = if (*units as f64) < average_units_3y - units_threshold_val {
             GREEN
-        } else if *units > average_units_3y as u32 {
+        } else if (*units as f64) > average_units_3y + units_threshold_val {
             RED
         } else {
             RESET
@@ -293,9 +298,10 @@ pub fn print_summary(reservations: &[Reservation]) {
             let key = (resource_type.clone(), month.clone());
             let (units, count) = by_type_month.get(&key).copied().unwrap_or((0, 0));
 
-            let color = if units < type_average_units as u32 && units > 0 {
+            // Apply color coding with threshold
+            let color = if (units as f64) < type_average_units - units_threshold_val {
                 GREEN
-            } else if units > type_average_units as u32 {
+            } else if (units as f64) > type_average_units + units_threshold_val {
                 RED
             } else {
                 RESET
