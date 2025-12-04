@@ -4,6 +4,30 @@ Azure reservation planning tool written in Rust
 
 Retrieves Azure reservations using the Azure CLI and displays monthly distribution analysis.
 
+## Setup
+
+### Option 1: Use .env file (Recommended)
+
+1. Copy `.env.example` to `.env`:
+   ```bash
+   cd reservation_plan
+   cp .env.example .env
+   ```
+
+2. Edit `.env` and set your Azure Management subscription ID:
+   ```
+   MANAGEMENT_SUBSCRIPTION_ID=your-subscription-id-here
+   ```
+   
+   You can get your subscription ID using:
+   ```bash
+   az account show --query id -o tsv
+   ```
+
+### Option 2: Use Azure CLI default (Fallback)
+
+If no `.env` file is present, the tool will automatically use the currently active subscription from Azure CLI (`az account show`). This is convenient for quick usage but may not query the correct subscription if your reservations are billed under a different subscription (e.g., Management subscription).
+
 ## Usage
 
        cd reservation_plan
@@ -18,11 +42,14 @@ Retrieves Azure reservations using the Azure CLI and displays monthly distributi
 ## Features
 
 * Fetches all active Azure reservations via Azure CLI
+* Retrieves monthly costs from Azure Cost Management API (previous complete month)
 * Caches results in `cache_reservations_YYYYMM.json` for the current month
 * Filters out expired and cancelled reservations by default
 * Displays comprehensive summary statistics:
   * Total reservations and quantity (flex units)
-  * Breakdown by resource type (e.g., VirtualMachines, PostgreSQL, etc.)
+  * Total monthly cost from Azure billing
+  * Breakdown by resource type with monthly costs (e.g., VirtualMachines, PostgreSQL, etc.)
+  * Per-VM-type cost breakdown
   * Breakdown by term (1 Year / 3 Years)
   * Monthly expiry distribution starting from current month
 * Color-coded monthly distribution:

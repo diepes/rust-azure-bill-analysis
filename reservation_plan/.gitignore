@@ -1,2 +1,2 @@
 # Exclude the json cache files
-cache_reservations_*.json
+cache_reservations_*.json.env
