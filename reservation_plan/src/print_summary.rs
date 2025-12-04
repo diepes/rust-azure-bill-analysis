@@ -178,7 +178,14 @@ pub fn print_summary(reservations: &[Reservation]) {
         .unwrap_or(6);
     let label_width = max_len.max(6); // Minimum 6 characters
 
-    // First line: ALL - total units/reservations with color based on units
+    // First line: month names
+    print!("{:>width$}|", "", width = label_width);
+    for (month, _, _) in &ordered_months {
+        print!("{:>8} |", format_month(month));
+    }
+    println!();
+
+    // Second line: ALL - total units/reservations with color based on units
     print!("{:>width$}|", "ALL", width = label_width);
     for (_, units, count) in &ordered_months {
         let color = if *units < average_units as u32 {
@@ -191,26 +198,41 @@ pub fn print_summary(reservations: &[Reservation]) {
         let display = if *count > 0 {
             format!("{}u/{}r", units, count)
         } else {
-            "0".to_string()
+            "-".to_string()
         };
         print!("{}{:>8}{} |", color, display, RESET);
     }
     println!();
 
-    // Second line: Cost - total commitment for each month
-    print!("{:>width$}|", "Cost", width = label_width);
+    // Third line: Cost - total commitment for each month
+    // Calculate average cost for color coding
+    let total_cost: f64 = month_cost_totals.values().sum();
+    let average_cost = total_cost / 12.0;
+    
+    print!("{:>width$}|", "Commitment/m", width = label_width);
     for (month, _, _) in &ordered_months {
         let cost = month_cost_totals.get(month).copied().unwrap_or(0.0);
+        let color = if cost > 0.0 {
+            if cost < average_cost - 4000.0 {
+                GREEN
+            } else if cost > average_cost + 4000.0 {
+                RED
+            } else {
+                RESET
+            }
+        } else {
+            RESET
+        };
         let display = if cost > 0.0 {
             format!("${:.0}k", cost / 1000.0)
         } else {
-            "".to_string()
+            "-".to_string()
         };
-        print!("{:>8} |", display);
+        print!("{}{:>8}{} |", color, display, RESET);
     }
     println!();
 
-    // Third line: 3year reservations
+    // Fourth line: 3year reservations
     // Aggregate 3-year counts by month
     let mut month_totals_3y: HashMap<String, (u32, u32)> = HashMap::new();
     for (year_month, (units, count)) in by_expiry_month_3y.iter() {
@@ -245,16 +267,9 @@ pub fn print_summary(reservations: &[Reservation]) {
         let display = if *count > 0 {
             format!("{}u/{}r", units, count)
         } else {
-            "0".to_string()
+            "-".to_string()
         };
         print!("{}{:>8}{} |", color, display, RESET);
-    }
-    println!();
-
-    // Fourth line: month names
-    print!("{:>width$}|", "", width = label_width);
-    for (month, _, _) in &ordered_months {
-        print!("{:>8} |", format_month(month));
     }
     println!();
 
@@ -289,12 +304,20 @@ pub fn print_summary(reservations: &[Reservation]) {
             let display = if count > 0 {
                 format!("{}u/{}r", units, count)
             } else {
-                "".to_string()
+                "-".to_string()
             };
             print!("{}{:>8}{} |", color, display, RESET);
         }
         println!();
     }
+    
+    // Last line: month names (repeated at bottom)
+    print!("{:>width$}|", "", width = label_width);
+    for (month, _, _) in &ordered_months {
+        print!("{:>8} |", format_month(month));
+    }
+    println!();
+    
     println!("\nTHE END.");
 }
 
