@@ -25,7 +25,7 @@ impl Bills {
         tag_summarise: &str,
         tag_filter: &str,
         global_opts: &crate::GlobalOpts,
-    ) -> SummaryData {
+    ) -> SummaryData<'_> {
         let re_name = RegexBuilder::new(name_regex)
             .case_insensitive(!global_opts.case_sensitive)
             .build()
