@@ -89,6 +89,7 @@ pub fn display_cost_by_filter(
                 .entry(prev_key.clone())
                 .and_modify(|cost_total| {
                     cost_total.cost -= prev_cost_total.cost;
+                    cost_total.cost_usd -= prev_cost_total.cost_usd;
                     cost_total.cost_unreserved -= prev_cost_total.cost_unreserved;
                     cost_total.source = CostSource::Combined;
                 })
@@ -315,9 +316,9 @@ fn print_summary(
     } else {
         format!(
             "Legend: cost colour's {red} {green} {blue} {cyan}",
-            red = "Red=Original(New)".red(),
-            green = "Green=Previous(Gone)".green(),
-            blue = "Blue=Combined(Changed)".blue(),
+            red = "Red=New(only in latest)".red(),
+            green = "Green=Saving(gone or reduced)".green(),
+            blue = "Blue=Increased".blue(),
             cyan = "Cyan=Credit/Refund(negative)".cyan(),
         )
     };
@@ -326,13 +327,16 @@ fn print_summary(
         let currency = f64_to_currency(*cost, 2);
         let part1 = format!("{cur} {currency:>11}");
 
-        let color_cost = if *cost < 0.0 {
-            part1.cyan().to_string()
-        } else {
-            match source {
-                CostSource::Original => part1.red().to_string(),
-                CostSource::Secondary => part1.green().to_string(),
-                CostSource::Combined => part1.blue().to_string(),
+        let color_cost = match source {
+            // Original: new item in latest bill. Negative = actual credit/refund.
+            CostSource::Original => {
+                if *cost < 0.0 { part1.cyan().to_string() } else { part1.red().to_string() }
+            }
+            // Secondary: only in previous bill (gone) — always a saving, show green.
+            CostSource::Secondary => part1.green().to_string(),
+            // Combined: in both bills. Negative = cost went down (green), positive = went up (blue).
+            CostSource::Combined => {
+                if *cost < 0.0 { part1.green().to_string() } else { part1.blue().to_string() }
             }
         };
         if *cost > global_opts.cost_min_display || *cost < -global_opts.cost_min_display {
@@ -353,7 +357,8 @@ fn print_summary(
     }
     if cnt > 0 {
         let total_colored = if total < 0.0 {
-            f64_to_currency(total, 2).cyan().bold().to_string()
+            // Negative net total = overall saving (comparison) or credit (single bill) — green
+            f64_to_currency(total, 2).green().bold().to_string()
         } else {
             f64_to_currency(total, 2).red().bold().to_string()
         };

@@ -383,8 +383,10 @@ impl Bills {
 mod tests {
     use std::path::PathBuf;
 
+    use crate::bills::bills_sum_data::{CostSource, CostTotal};
+    use crate::bills::cost_type_enum::CostType;
     use crate::cmd_parse::GlobalOpts;
-    use crate::money::Nzd;
+    use crate::money::{Nzd, Usd};
 
     // use super::*;
 
@@ -447,5 +449,84 @@ mod tests {
         );
         assert_eq!(first_bill.quantity, 0.194368534, "quantity mismatch");
         assert_eq!(first_bill.cost, Nzd(0.003025655), "cost mismatch");
+    }
+
+    /// Verify that when two bills are compared (latest − previous) the NZD and USD
+    /// deltas are both computed correctly for each CostSource scenario:
+    ///   Combined  — present in both bills → delta = latest − previous
+    ///   Original  — only in latest        → full latest cost
+    ///   Secondary — only in previous      → negated previous cost
+    #[test]
+    fn test_compare_bills_nzd_usd_deltas() {
+        let global_opts = &GLOBAL_OPTS;
+        let latest_path = PathBuf::from("tests/azure_test_nzd_usd_latest.csv");
+        let prev_path = PathBuf::from("tests/azure_test_nzd_usd_prev.csv");
+
+        let mut latest_bills = crate::bills::Bills::default();
+        latest_bills
+            .parse_csv(&latest_path, global_opts)
+            .expect("latest CSV parse failed");
+
+        let mut prev_bills = crate::bills::Bills::default();
+        prev_bills
+            .parse_csv(&prev_path, global_opts)
+            .expect("prev CSV parse failed");
+
+        let no_filter = "";
+        let latest_summary = latest_bills.cost_by_any_summary(
+            no_filter, no_filter, no_filter, no_filter, no_filter, no_filter, no_filter,
+            no_filter, no_filter, global_opts,
+        );
+        let prev_summary = prev_bills.cost_by_any_summary(
+            no_filter, no_filter, no_filter, no_filter, no_filter, no_filter, no_filter,
+            no_filter, no_filter, global_opts,
+        );
+
+        // Simulate the merge/subtract from display.rs
+        let mut merged = latest_summary.per_type;
+        for (prev_key, prev_cost) in &prev_summary.per_type {
+            merged
+                .entry(prev_key.clone())
+                .and_modify(|e| {
+                    e.cost -= prev_cost.cost;
+                    e.cost_usd -= prev_cost.cost_usd;
+                    e.source = CostSource::Combined;
+                })
+                .or_insert(CostTotal {
+                    cost: -prev_cost.cost,
+                    cost_usd: -prev_cost.cost_usd,
+                    cost_unreserved: -prev_cost.cost_unreserved,
+                    source: CostSource::Secondary,
+                });
+        }
+
+        let rg_key = (CostType::ResourceGroup, "rg-delta-test".to_string());
+        let delta = merged.get(&rg_key).expect("rg-delta-test not found");
+        assert!(
+            matches!(delta.source, CostSource::Combined),
+            "rg-delta-test should be Combined"
+        );
+        assert_eq!(delta.cost, Nzd(20.0), "NZD delta should be 20.0");
+        assert_eq!(delta.cost_usd, Usd(12.0), "USD delta should be 12.0");
+
+        // rg-new-only: only in latest → Original, full cost
+        let new_key = (CostType::ResourceGroup, "rg-new-only".to_string());
+        let new_item = merged.get(&new_key).expect("rg-new-only not found");
+        assert!(
+            matches!(new_item.source, CostSource::Original),
+            "rg-new-only should be Original"
+        );
+        assert_eq!(new_item.cost, Nzd(50.0), "NZD should be 50.0");
+        assert_eq!(new_item.cost_usd, Usd(30.0), "USD should be 30.0");
+
+        // rg-gone-only: only in previous → Secondary, negated
+        let gone_key = (CostType::ResourceGroup, "rg-gone-only".to_string());
+        let gone_item = merged.get(&gone_key).expect("rg-gone-only not found");
+        assert!(
+            matches!(gone_item.source, CostSource::Secondary),
+            "rg-gone-only should be Secondary"
+        );
+        assert_eq!(gone_item.cost, Nzd(-40.0), "NZD should be -40.0");
+        assert_eq!(gone_item.cost_usd, Usd(-24.0), "USD should be -24.0");
     }
 }
