@@ -29,6 +29,11 @@ A Rust CLI tool that parses **Azure "Detailed" cost export CSVs** (amortized/enr
 | **CostType** | Dimension used to group costs: `ResourceName`, `ResourceGroup`, `Subscription`, `MeterCategory`, `MeterSubCategory`, `Tag`, `Reservation`, `Region` |
 | **CostSource** | Indicates which bill a cost entry came from: `Original` (latest), `Secondary` (previous, shown as negative), `Combined` (appears in both) |
 | **file_short_name** | Date portion extracted from the billing CSV filename (format `_YYYYMM_`) |
+| **BillFilter** | Compiled set of regex filters (name, RG, subscription, category, location, reservation, tag, invoice section) constructed from CLI args; encodes the empty-string=match-all convention |
+| **merge_summaries** | Pure function that subtracts a previous `SummaryData` from the latest one and tags each entry with its `CostSource` |
+| **PreparedRow** | Display-ready row produced by `prepare_rows` — carries NZD cost, USD cost, name, colour label, and `CostSource`; internal to the display module |
+| **FilterOpts** | Subset of options relevant to filtering (`case_sensitive`); passed to `BillFilter::new()` |
+| **DisplayOpts** | Subset of options relevant to rendering (`cost_min_display`, `tag_list`, `debug`); passed to display functions |
 
 ## Architecture
 

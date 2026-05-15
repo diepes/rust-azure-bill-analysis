@@ -451,6 +451,102 @@ mod tests {
         assert_eq!(first_bill.cost, Nzd(0.003025655), "cost mismatch");
     }
 
+    /// Verify `cost_by_any_summary` accumulates NZD and USD correctly into `per_type`
+    /// for each CostType dimension, and that `filtered_cost_total` matches the sum.
+    ///
+    /// Uses the two-row NZD/USD fixture (latest) so expected values are known exactly.
+    #[test]
+    fn test_cost_by_any_summary_per_type_nzd_usd() {
+        let global_opts = &GLOBAL_OPTS;
+        let path = PathBuf::from("tests/azure_test_nzd_usd_latest.csv");
+        let mut bills = crate::bills::Bills::default();
+        bills.parse_csv(&path, global_opts).expect("parse failed");
+
+        let nf = "";
+        let summary = bills.cost_by_any_summary(
+            nf, nf, nf, nf, nf, nf, nf, nf, nf, global_opts,
+        );
+
+        // Both rows have MeterCategory=Compute → aggregate across both
+        let mc_key = (CostType::MeterCategory, "Compute".to_string());
+        let mc = summary.per_type.get(&mc_key).expect("MeterCategory Compute missing");
+        assert_eq!(mc.cost, Nzd(150.0), "MeterCategory NZD total");
+        assert_eq!(mc.cost_usd, Usd(90.0), "MeterCategory USD total");
+
+        // Individual ResourceGroup entries
+        let rg1_key = (CostType::ResourceGroup, "rg-delta-test".to_string());
+        let rg1 = summary.per_type.get(&rg1_key).expect("rg-delta-test missing");
+        assert_eq!(rg1.cost, Nzd(100.0), "rg-delta-test NZD");
+        assert_eq!(rg1.cost_usd, Usd(60.0), "rg-delta-test USD");
+
+        let rg2_key = (CostType::ResourceGroup, "rg-new-only".to_string());
+        let rg2 = summary.per_type.get(&rg2_key).expect("rg-new-only missing");
+        assert_eq!(rg2.cost, Nzd(50.0), "rg-new-only NZD");
+        assert_eq!(rg2.cost_usd, Usd(30.0), "rg-new-only USD");
+
+        // filtered_cost_total must equal sum of all rows
+        assert_eq!(summary.filtered_cost_total, Nzd(150.0), "filtered NZD total");
+        assert_eq!(summary.filtered_cost_total_usd, Usd(90.0), "filtered USD total");
+    }
+
+    /// Verify that the rg_regex filter includes matching rows and excludes non-matching rows.
+    /// Both `per_type` and `filtered_cost_total` must reflect the filtered subset only.
+    #[test]
+    fn test_cost_by_any_summary_rg_filter() {
+        let global_opts = &GLOBAL_OPTS;
+        let path = PathBuf::from("tests/azure_test_nzd_usd_latest.csv");
+        let mut bills = crate::bills::Bills::default();
+        bills.parse_csv(&path, global_opts).expect("parse failed");
+
+        let nf = "";
+        let summary = bills.cost_by_any_summary(
+            nf, "rg-delta-test", nf, nf, nf, nf, nf, nf, nf, global_opts,
+        );
+
+        // Matching RG present with full row cost
+        let rg_key = (CostType::ResourceGroup, "rg-delta-test".to_string());
+        let rg = summary.per_type.get(&rg_key).expect("rg-delta-test missing after filter");
+        assert_eq!(rg.cost, Nzd(100.0), "filtered rg NZD");
+        assert_eq!(rg.cost_usd, Usd(60.0), "filtered rg USD");
+
+        // Non-matching RG must be absent
+        let excluded_key = (CostType::ResourceGroup, "rg-new-only".to_string());
+        assert!(
+            summary.per_type.get(&excluded_key).is_none(),
+            "rg-new-only should be excluded by rg filter"
+        );
+
+        // Totals reflect filtered row only
+        assert_eq!(summary.filtered_cost_total, Nzd(100.0), "filtered NZD total");
+        assert_eq!(summary.filtered_cost_total_usd, Usd(60.0), "filtered USD total");
+    }
+
+    /// Invariant: sum of all (ResourceGroup, *) values in `per_type` must equal
+    /// `filtered_cost_total` and `filtered_cost_total_usd`.
+    #[test]
+    fn test_filtered_totals_equal_per_type_rg_sum() {
+        let global_opts = &GLOBAL_OPTS;
+        let path = PathBuf::from("tests/azure_test_nzd_usd_latest.csv");
+        let mut bills = crate::bills::Bills::default();
+        bills.parse_csv(&path, global_opts).expect("parse failed");
+
+        let nf = "";
+        let summary = bills.cost_by_any_summary(
+            nf, nf, nf, nf, nf, nf, nf, nf, nf, global_opts,
+        );
+
+        let (rg_nzd_sum, rg_usd_sum) = summary
+            .per_type
+            .iter()
+            .filter(|((ct, _), _)| *ct == CostType::ResourceGroup)
+            .fold((Nzd(0.0), Usd(0.0)), |(n, u), (_, v)| {
+                (n + v.cost, u + v.cost_usd)
+            });
+
+        assert_eq!(rg_nzd_sum, summary.filtered_cost_total, "RG NZD sum == filtered total");
+        assert_eq!(rg_usd_sum, summary.filtered_cost_total_usd, "RG USD sum == filtered total USD");
+    }
+
     /// Verify that when two bills are compared (latest − previous) the NZD and USD
     /// deltas are both computed correctly for each CostSource scenario:
     ///   Combined  — present in both bills → delta = latest − previous
