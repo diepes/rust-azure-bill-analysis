@@ -92,6 +92,7 @@ fn main() {
                 app.reservation,
                 app.tag_summarise,
                 app.tag_filter,
+                app.invoice_section,
                 latest_bill,
                 previous_bill,
                 &app.global_opts,

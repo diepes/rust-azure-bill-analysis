@@ -13,10 +13,12 @@ pub struct App {
     // Commands to run
     #[command(subcommand)]
     pub command: Option<Commands>,
+    /// regex find to filter on invoice section name
+    #[arg(long)]
+    pub invoice_section: Option<String>,
     /// regex find to filter on region/location terminate with '$' e.g. "AustraliaEast" also "any" & "none" valid.
     #[arg(long)]
     pub location: Option<String>,
-    /// regex find to filter on meter category terminate with '$'
     #[arg(short, long)]
     pub meter_category: Option<String>,
     /// regex find to filter on specific resource name, if not using diskfile option.'$'

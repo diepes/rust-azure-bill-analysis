@@ -21,6 +21,7 @@ pub fn display_cost_by_filter(
     reservation_r: Option<String>,
     tag_summarise: Option<String>,
     tag_filter: Option<String>,
+    invoice_section_r: Option<String>,
     // file_or_folder: PathBuf,
     latest_bill: Bills,
     previous_bill: Option<Bills>,
@@ -29,7 +30,7 @@ pub fn display_cost_by_filter(
 ) {
     println!();
     println!(
-        "Filter Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}, tag_r:{tag_filter:?}, tag_s:{tag_summarise:?}, location_r:{location_r:?}, reservation_r:{reservation_r:?}.\n"
+        "Filter Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}, tag_r:{tag_filter:?}, tag_s:{tag_summarise:?}, location_r:{location_r:?}, reservation_r:{reservation_r:?}, invoice_section_r:{invoice_section_r:?}.\n"
     );
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
     // and print the cost
@@ -42,6 +43,7 @@ pub fn display_cost_by_filter(
     let s_reservation = reservation_r.unwrap_or("".to_string());
     let s_tag_s = tag_summarise.clone().unwrap_or("".to_string());
     let s_tag_r = tag_filter.unwrap_or("".to_string());
+    let s_invoice_section = invoice_section_r.unwrap_or("".to_string());
     let mut display_date = latest_bill.file_short_name.clone();
 
     let mut bill_summary = latest_bill.cost_by_any_summary(
@@ -53,6 +55,7 @@ pub fn display_cost_by_filter(
         &s_reservation,
         &s_tag_s,
         &s_tag_r,
+        &s_invoice_section,
         global_opts,
     );
     let mut total_cost = bill_summary.filtered_cost_total;
@@ -73,6 +76,7 @@ pub fn display_cost_by_filter(
             &s_reservation,
             &s_tag_s,
             &s_tag_r,
+            &s_invoice_section,
             global_opts,
         );
         total_cost -= prev_bill_summary.filtered_cost_total;
@@ -113,6 +117,13 @@ pub fn display_cost_by_filter(
     println!("## Location bill details {} '{}'", s_location, display_date);
     print_summary(&bill_summary, &cur, CostType::Region, global_opts);
     println!();
+
+    // print Invoice Section bill details (only when filter specified)
+    if !s_invoice_section.is_empty() {
+        println!("## Invoice Section bill details '{}' '{}'", s_invoice_section, display_date);
+        print_summary(&bill_summary, &cur, CostType::InvoiceSection, global_opts);
+        println!();
+    }
 
     // print Subscription bill details
     println!("## Subscription bill details {} '{}'", s_sub, display_date);

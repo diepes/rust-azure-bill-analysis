@@ -59,6 +59,9 @@ pub struct BillEntry {
     pub resource_group: String,
     #[serde(alias = "ResourceLocation")]
     pub resource_location: String,
+    // Not present in old format test data
+    #[serde(default, rename = "invoiceSectionName")]
+    pub invoice_section: String,
     #[serde(alias = "PublisherName")]
     pub publisher_name: String,
     // Not present in new format

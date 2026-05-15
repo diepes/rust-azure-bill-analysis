@@ -25,6 +25,7 @@ impl Bills {
         reservation_regex: &str,
         tag_summarise: &str,
         tag_filter: &str,
+        invoice_section_regex: &str,
         global_opts: &crate::GlobalOpts,
     ) -> SummaryData<'_> {
         let re_name = RegexBuilder::new(name_regex)
@@ -55,6 +56,10 @@ impl Bills {
             .case_insensitive(!global_opts.case_sensitive)
             .build()
             .expect("Invalid regex for tag");
+        let re_invoice_section = RegexBuilder::new(invoice_section_regex)
+            .case_insensitive(!global_opts.case_sensitive)
+            .build()
+            .expect("Invalid regex for invoice section");
         // collect set of resource groups in set rgs
         let mut summary_data = SummaryData::default();
         // bill_details record cost per filter category e.g. name_regex, rg_regex, subs_regex, meter_category
@@ -74,6 +79,10 @@ impl Bills {
             } else if !tag_filter.is_empty() && !re_tag.is_match(&bill.tags.value) {
                 flag_match = false;
             } else if !reservation_regex.is_empty() && !re_reservation.is_match(&bill.benefit_name)
+            {
+                flag_match = false;
+            } else if !invoice_section_regex.is_empty()
+                && !re_invoice_section.is_match(&bill.invoice_section)
             {
                 flag_match = false;
             } else if match (
@@ -192,6 +201,28 @@ impl Bills {
                 summary_data
                     .per_type
                     .entry((CostType::Region, region.to_string()))
+                    .and_modify(|e| {
+                        e.cost += bill.cost;
+                        e.cost_usd += bill.cost_usd;
+                        e.cost_unreserved += cost_unreserved;
+                    })
+                    .or_insert(CostTotal {
+                        cost: bill.cost,
+                        cost_usd: bill.cost_usd,
+                        cost_unreserved: cost_unreserved,
+                        source: CostSource::Original,
+                    });
+
+                let section = if !bill.invoice_section.is_empty() {
+                    bill.invoice_section.clone()
+                } else if !bill.meter_sub_category.is_empty() {
+                    format!("({})", bill.meter_sub_category)
+                } else {
+                    "none".to_string()
+                };
+                summary_data
+                    .per_type
+                    .entry((CostType::InvoiceSection, section.to_string()))
                     .and_modify(|e| {
                         e.cost += bill.cost;
                         e.cost_usd += bill.cost_usd;

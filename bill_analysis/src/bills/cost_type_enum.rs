@@ -8,6 +8,7 @@ pub enum CostType {
     Tag,
     Reservation,
     Region, //Location
+    InvoiceSection,
 }
 impl CostType {
     pub fn as_str(&self) -> &str {
@@ -20,6 +21,7 @@ impl CostType {
             CostType::Tag => "Tag",
             CostType::Reservation => "Reservation",
             CostType::Region => "Region",
+            CostType::InvoiceSection => "InvoiceSection",
         }
     }
     // short name 3 char
@@ -33,6 +35,7 @@ impl CostType {
             CostType::Tag => "Tag",
             CostType::Reservation => "Resrv",
             CostType::Region => "Loc",
+            CostType::InvoiceSection => "Sec",
         }
     }
 }
