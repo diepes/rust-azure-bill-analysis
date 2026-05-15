@@ -20,33 +20,32 @@ impl Bills {
     pub fn calc_all_totals(&mut self) {
         let mut total_cost = Nzd::default();
         let mut total_cost_usd = Usd::default();
-        let mut total_no_reservation = 0.0;
-        let mut total_effective = 0.0;
-        let mut total_savings_used = 0.0;
-        let mut total_savings_un_used = 0.0;
-        let mut total_savings_meter_category_map: HashMap<String, (f64, f64)> = HashMap::new();
+        let mut total_no_reservation = Usd::default();
+        let mut total_effective = Usd::default();
+        let mut total_savings_used = Usd::default();
+        let mut total_savings_un_used = Usd::default();
+        let mut total_savings_meter_category_map: HashMap<String, (Usd, Usd)> = HashMap::new();
         // Loop over all bills.
         for bill in &self.bills {
             total_cost += bill.cost;
             total_cost_usd += bill.cost_usd;
-            total_no_reservation += bill.unit_price * bill.quantity;
-            total_effective += bill.effective_price * bill.quantity;
+            total_no_reservation += Usd(bill.unit_price * bill.quantity);
+            total_effective += Usd(bill.effective_price * bill.quantity);
 
-            //if !bill.meter_category.is_empty() && bill.charge_type == "Usage" {
             if !bill.reservation_name.is_empty() && bill.charge_type == "Usage" {
-                total_savings_used += (bill.unit_price - bill.effective_price) * bill.quantity;
+                total_savings_used += Usd((bill.unit_price - bill.effective_price) * bill.quantity);
                 let entry = total_savings_meter_category_map
                     .entry(bill.meter_category.clone())
-                    .or_insert((0.0, 0.0));
-                entry.0 += (bill.unit_price - bill.effective_price) * bill.quantity;
+                    .or_insert((Usd::default(), Usd::default()));
+                entry.0 += Usd((bill.unit_price - bill.effective_price) * bill.quantity);
             } else if bill.charge_type == "UnusedSavingsPlan"
                 || bill.charge_type == "UnusedReservation"
             {
-                total_savings_un_used += bill.effective_price * bill.quantity;
+                total_savings_un_used += Usd(bill.effective_price * bill.quantity);
                 let entry = total_savings_meter_category_map
                     .entry(bill.meter_category.clone())
-                    .or_insert((0.0, 0.0));
-                entry.1 += (bill.effective_price) * bill.quantity;
+                    .or_insert((Usd::default(), Usd::default()));
+                entry.1 += Usd(bill.effective_price * bill.quantity);
             } else {
                 // Reservation purchases and other non-usage charge types are
                 // excluded from savings calculations.
@@ -77,33 +76,31 @@ impl Bills {
         }
     }
 
-    pub fn total_no_reservation(&self) -> f64 {
+    pub fn total_no_reservation(&self) -> Usd {
         self.bills
             .iter()
-            .fold(0.0, |acc, bill| acc + bill.unit_price * bill.quantity)
+            .fold(Usd::default(), |acc, bill| acc + Usd(bill.unit_price * bill.quantity))
     }
-    pub fn total_effective(&self) -> f64 {
+    pub fn total_effective(&self) -> Usd {
         self.bills
             .iter()
-            .fold(0.0, |acc, bill| acc + bill.effective_price * bill.quantity)
+            .fold(Usd::default(), |acc, bill| acc + Usd(bill.effective_price * bill.quantity))
     }
     // Function to calculte the total savings
     // https://learn.microsoft.com/en-us/azure/cost-management-billing/reservations/calculate-ea-reservations-savings
-    pub fn total_used_savings(&self) -> f64 {
-        self.bills.iter().fold(0.0, |acc, bill| {
+    pub fn total_used_savings(&self) -> Usd {
+        self.bills.iter().fold(Usd::default(), |acc, bill| {
             if !bill.reservation_name.is_empty() && bill.charge_type == "Usage" {
-                acc + (bill.unit_price - bill.effective_price) * bill.quantity
+                acc + Usd((bill.unit_price - bill.effective_price) * bill.quantity)
             } else {
                 acc
             }
         })
     }
-    pub fn total_unused_savings(&self) -> f64 {
-        // In the billing data there is a charge_type "UnusedReservation" for every "date" and reservation.
-        self.bills.iter().fold(0.0, |acc, bill| {
-            // bill.charge_type != "Usage"
+    pub fn total_unused_savings(&self) -> Usd {
+        self.bills.iter().fold(Usd::default(), |acc, bill| {
             if bill.charge_type == "UnusedSavingsPlan" || bill.charge_type == "UnusedReservation" {
-                acc + bill.effective_price * bill.quantity
+                acc + Usd(bill.effective_price * bill.quantity)
             } else {
                 // skip and check assertions
                 // Purchase and Refund charge types are non-usage charges, skip them.
@@ -121,35 +118,33 @@ impl Bills {
     }
     // Function to calculte the savings for meter_category
     // benefit_name != "" && charge_type == "Usage" && meter_category == Input then sum the (unit_price - effective_price) * quantity for each bill
-    pub fn savings(&self, meter_category: &str) -> f64 {
-        self.bills.iter().fold(0.0, |acc, bill| {
+    pub fn savings(&self, meter_category: &str) -> Usd {
+        self.bills.iter().fold(Usd::default(), |acc, bill| {
             if !bill.benefit_name.is_empty()
                 && bill.charge_type == "Usage"
                 && bill.meter_category == meter_category
             {
-                acc + (bill.unit_price - bill.effective_price) * bill.quantity
+                acc + Usd((bill.unit_price - bill.effective_price) * bill.quantity)
             } else {
                 acc
             }
         })
     }
-    // calculate savings and unused savings for all categories
-    pub fn savings_all_categories(&self) -> HashMap<&str, (f64, f64)> {
-        let mut savings_map: HashMap<&str, (f64, f64)> = HashMap::new();
+    pub fn savings_all_categories(&self) -> HashMap<&str, (Usd, Usd)> {
+        let mut savings_map: HashMap<&str, (Usd, Usd)> = HashMap::new();
         for bill in &self.bills {
-            //if !bill.meter_category.is_empty() && bill.charge_type == "Usage" {
             if !bill.reservation_name.is_empty() && bill.charge_type == "Usage" {
                 let entry = savings_map
                     .entry(&bill.meter_category)
-                    .or_insert((0.0, 0.0));
-                entry.0 += (bill.unit_price - bill.effective_price) * bill.quantity;
+                    .or_insert((Usd::default(), Usd::default()));
+                entry.0 += Usd((bill.unit_price - bill.effective_price) * bill.quantity);
             } else if bill.charge_type == "UnusedSavingsPlan"
                 || bill.charge_type == "UnusedReservation"
             {
                 let entry = savings_map
                     .entry(&bill.meter_category)
-                    .or_insert((0.0, 0.0));
-                entry.1 += (bill.effective_price) * bill.quantity;
+                    .or_insert((Usd::default(), Usd::default()));
+                entry.1 += Usd(bill.effective_price * bill.quantity);
             } else {
                 // Reservation purchases and other non-usage charge types are
                 // excluded from savings calculations.

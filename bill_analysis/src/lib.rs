@@ -104,15 +104,13 @@ pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts
     let tax_nzd = t_cost_nzd.amount() * gst_rate;
     let total_incl_tax = t_cost_nzd.amount() * (1.0 + gst_rate);
     let t_sav_used = bills.total_used_savings();
-    let c_sav_used = f64_to_currency(t_sav_used, 2);
     let t_sav_unused = bills.total_unused_savings();
-    let c_sav_unused = f64_to_currency(t_sav_unused, 2);
     println!(
-        "Total cost {t_cost_nzd}  ({t_cost_usd})  [savings approx. USD: res_save US$ {c_sav_used} + res_unused US$ {c_sav_unused}]",
+        "Total cost {t_cost_nzd}  ({t_cost_usd})  [savings approx.: res_save {t_sav_used} + res_unused {t_sav_unused}]",
         t_cost_nzd = format!("{t_cost_nzd}").red().bold(),
         t_cost_usd = format!("{t_cost_usd}").bold(),
-        c_sav_unused = c_sav_unused.on_red(),
-        c_sav_used = c_sav_used.yellow(),
+        t_sav_used = format!("{t_sav_used}").yellow(),
+        t_sav_unused = format!("{t_sav_unused}").on_red(),
     );
     println!(
         "  GST (15%)  NZ$ {tax}  →  Total incl. GST  NZ$ {total_incl}",
@@ -129,30 +127,26 @@ pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts
 
     // print details of the savings
     let savings_all = bills.savings_all_categories();
-    // let categorys = ["Virtual Machines","Azure App Service", "SQL Managed Instance"] ;
-    let mut total_savings = 0.0;
-    let mut total_unused_savings = 0.0;
+    let mut total_savings = crate::money::Usd::default();
+    let mut total_unused_savings = crate::money::Usd::default();
     for meter_category in savings_all.keys() {
-        // let savings = f64_to_currency(bills.savings(meter_category), 2);
         let (savings, unused_savings) = savings_all[meter_category];
         total_savings += savings;
         total_unused_savings += unused_savings;
-        let c_savings = f64_to_currency(savings, 2);
-        let c_unused_savings = f64_to_currency(unused_savings, 2);
-        if savings.abs() < 0.01 && unused_savings.abs() < 0.01 {
+        if savings.amount().abs() < 0.01 && unused_savings.amount().abs() < 0.01 {
             continue;
         }
         println!(
-            "  Savings by meter_category:{meter_category:>32} US$ {savings:>10} and Unused US$ {unused_savings:<8}",
+            "  Savings by meter_category:{meter_category:>32} {savings:>14} and Unused {unused_savings}",
             meter_category = format!("'{}'", meter_category),
-            savings = c_savings.yellow(),
-            unused_savings = c_unused_savings.red(),
+            savings = format!("{savings}").yellow(),
+            unused_savings = format!("{unused_savings}").red(),
         );
     }
     println!(
-        "  Savings Total US$ {total_savings} Unused {total_unused_savings}",
-        total_savings = f64_to_currency(total_savings, 2).yellow(),
-        total_unused_savings = f64_to_currency(total_unused_savings, 2).red(),
+        "  Savings Total {total_savings} Unused {total_unused_savings}",
+        total_savings = format!("{total_savings}").yellow(),
+        total_unused_savings = format!("{total_unused_savings}").red(),
     );
     println!();
 }

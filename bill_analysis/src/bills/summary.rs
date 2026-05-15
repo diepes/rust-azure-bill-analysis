@@ -9,11 +9,11 @@ pub struct Summary {
     pub total_cost: Nzd,
     pub total_cost_usd: Usd,
     pub exchange_rate: f64,       // pricing currency (USD) → billing currency (NZD)
-    pub total_no_reservation: f64,
-    pub total_effective: f64,
-    pub total_savings_used: f64,
-    pub total_savings_un_used: f64,
-    pub total_savings_meter_category_map: HashMap<String, (f64, f64)>,
+    pub total_no_reservation: Usd,
+    pub total_effective: Usd,
+    pub total_savings_used: Usd,
+    pub total_savings_un_used: Usd,
+    pub total_savings_meter_category_map: HashMap<String, (Usd, Usd)>,
 }
 
 impl Bills {
@@ -39,28 +39,23 @@ impl Bills {
                 len = self.len(),
             );
             //println!("{:?}", bills[0]);
-        let cur = "US$"; // savings are computed from effectivePrice/unitPrice which are USD
+        let no_res = self.total_no_reservation();
+            let effective = self.total_effective();
+            let savings = no_res - effective;
+            let save_percent = if no_res.amount() != 0.0 {
+                savings.amount() / no_res.amount() * 100.0
+            } else {
+                0.0
+            };
             println!(
-                "Total no_reservation {:.2} {cur}  -  Total effective {:.2} {cur}  = {savings:.2} {cur} Savings/month {save_percent:.1}% . [Unused Savings: {unused:.2} {cur}]",
-                self.total_no_reservation(),
-                self.total_effective(),
-                savings = self.total_no_reservation() - self.total_effective(),
-                save_percent = (self.total_no_reservation() - self.total_effective())
-                    / self.total_no_reservation()
-                    * 100.0,
+                "Total no_reservation {no_res}  -  Total effective {effective}  = {savings} Savings/month {save_percent:.1}% . [Unused Savings: {unused}]",
                 unused = self.total_unused_savings(),
             );
-            print!("Total Used Savings {:.2} {cur}", self.total_used_savings());
+            print!("Total Used Savings {}", self.total_used_savings());
             let meter_category = "Virtual Machines";
-            print!(
-                "Savings '{meter_category}' {:.2} {cur}",
-                self.savings(meter_category)
-            );
+            print!("Savings '{meter_category}' {}", self.savings(meter_category));
             let meter_category = "Azure App Service";
-            print!(
-                "Savings '{meter_category}' {:.2} {cur}",
-                self.savings(meter_category)
-            );
+            print!("Savings '{meter_category}' {}", self.savings(meter_category));
             println!();
         }
     }
