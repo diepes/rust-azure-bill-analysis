@@ -2,8 +2,11 @@
 /// see bill/calc/summary.rs for actual implementation.
 ///
 use crate::bills::cost_type_enum::CostType;
+use crate::money::{Nzd, Usd};
+
 pub struct CostTotal {
-    pub cost: f64,
+    pub cost: Nzd,
+    pub cost_usd: Usd,
     pub source: CostSource,
     pub cost_unreserved: f64,
 }
@@ -33,7 +36,8 @@ pub struct SummaryData<'a> {
     pub per_type: std::collections::HashMap<(CostType, String), CostTotal>,
     // bill_details record cost per filter category e.g. name_regex, rg_regex, subs_regex, meter_category
     pub details: std::collections::HashSet<String>,
-    pub filtered_cost_total: f64,
+    pub filtered_cost_total: Nzd,
+    pub filtered_cost_total_usd: Usd,
     pub reservations: std::collections::HashMap<(String, u8), ReservationInfo<'a>>, // flex type, day of month
 }
 impl<'a> Default for SummaryData<'a> {
@@ -41,7 +45,8 @@ impl<'a> Default for SummaryData<'a> {
         SummaryData {
             per_type: std::collections::HashMap::new(),
             details: std::collections::HashSet::new(),
-            filtered_cost_total: 0.0,
+            filtered_cost_total: Nzd::default(),
+            filtered_cost_total_usd: Usd::default(),
             reservations: std::collections::HashMap::new(),
         }
     }

@@ -1,6 +1,7 @@
 use crate::bills::Bills;
 use crate::bills::bill_entry::BillEntry;
 use crate::bills::summary::Summary;
+use crate::money::{Nzd, Usd};
 // use crate::bills::bills_struct::Bills;
 use std::collections::HashMap;
 
@@ -17,7 +18,8 @@ impl Bills {
     }
 
     pub fn calc_all_totals(&mut self) {
-        let mut total_cost = 0.0;
+        let mut total_cost = Nzd::default();
+        let mut total_cost_usd = Usd::default();
         let mut total_no_reservation = 0.0;
         let mut total_effective = 0.0;
         let mut total_savings_used = 0.0;
@@ -26,6 +28,7 @@ impl Bills {
         // Loop over all bills.
         for bill in &self.bills {
             total_cost += bill.cost;
+            total_cost_usd += bill.cost_usd;
             total_no_reservation += bill.unit_price * bill.quantity;
             total_effective += bill.effective_price * bill.quantity;
 
@@ -45,9 +48,12 @@ impl Bills {
                     .or_insert((0.0, 0.0));
                 entry.1 += (bill.effective_price) * bill.quantity;
             } else {
-                // assert reservation_name is empty
-                assert!(
-                    bill.reservation_name.is_empty(),
+                // Reservation purchases and other non-usage charge types are
+                // excluded from savings calculations.
+                debug_assert!(
+                    bill.reservation_name.is_empty()
+                        || bill.charge_type == "Purchase"
+                        || bill.charge_type == "Refund",
                     "calc savings_all_categories - Unexpected reservation_name:'{res}' charge_type:'{t}' category:'{cat}'",
                     res = bill.reservation_name,
                     t = bill.charge_type,
@@ -57,6 +63,7 @@ impl Bills {
         }
         self.summary = Summary {
             total_cost,
+            total_cost_usd,
             total_no_reservation,
             total_effective,
             total_savings_used,
@@ -94,15 +101,15 @@ impl Bills {
                 acc + bill.effective_price * bill.quantity
             } else {
                 // skip and check assertions
-                // Asset to catch unknown charge_type, we did find "Purchase" at $0, ignore.
-                if !(bill.effective_price == 0.0 && bill.unit_price == 0.0) {
-                    // assert bill.charge_type one of "Usage", "RoundingAdjustment"
-                    assert!(
-                        bill.charge_type == "Usage" || bill.charge_type == "RoundingAdjustment",
-                        "Unexpected charge_type '{}'",
-                        bill.charge_type
-                    );
-                };
+                // Purchase and Refund charge types are non-usage charges, skip them.
+                assert!(
+                    bill.charge_type == "Usage"
+                        || bill.charge_type == "RoundingAdjustment"
+                        || bill.charge_type == "Purchase"
+                        || bill.charge_type == "Refund",
+                    "Unexpected charge_type '{}'",
+                    bill.charge_type
+                );
                 acc
             }
         })
@@ -139,9 +146,12 @@ impl Bills {
                     .or_insert((0.0, 0.0));
                 entry.1 += (bill.effective_price) * bill.quantity;
             } else {
-                // assert reservation_name is empty
-                assert!(
-                    bill.reservation_name.is_empty(),
+                // Reservation purchases and other non-usage charge types are
+                // excluded from savings calculations.
+                debug_assert!(
+                    bill.reservation_name.is_empty()
+                        || bill.charge_type == "Purchase"
+                        || bill.charge_type == "Refund",
                     "calc savings_all_categories - Unexpected reservation_name:'{res}' charge_type:'{t}' category:'{cat}'",
                     res = bill.reservation_name,
                     t = bill.charge_type,
@@ -152,9 +162,8 @@ impl Bills {
         savings_map
     }
     // filter cost for specific resource e.g. disk
-    pub fn cost_by_resource_name(&self, resource_name: &str) -> f64 {
-        self.bills.iter().fold(0.0, |acc, bill| {
-            // bill.subscription_name == resource_group &&
+    pub fn cost_by_resource_name(&self, resource_name: &str) -> Nzd {
+        self.bills.iter().fold(Nzd::default(), |acc, bill| {
             if bill.resource_name == resource_name {
                 acc + bill.cost
             } else {

@@ -56,6 +56,7 @@ pub fn display_cost_by_filter(
         global_opts,
     );
     let mut total_cost = bill_summary.filtered_cost_total;
+    let mut total_cost_usd = bill_summary.filtered_cost_total_usd;
     // If we got a previous bill calculate summary and subtract.
     if let Some(prev_bill) = previous_bill {
         display_date = format!(
@@ -75,6 +76,7 @@ pub fn display_cost_by_filter(
             global_opts,
         );
         total_cost -= prev_bill_summary.filtered_cost_total;
+        total_cost_usd -= prev_bill_summary.filtered_cost_total_usd;
         // merge negative values from prev_bill_details into bill_details Hashmap
         // key (CostType, "resource_name")
         for (prev_key, prev_cost_total) in &prev_bill_summary.per_type {
@@ -88,6 +90,7 @@ pub fn display_cost_by_filter(
                 })
                 .or_insert(CostTotal {
                     cost: -prev_cost_total.cost,
+                    cost_usd: -prev_cost_total.cost_usd,
                     cost_unreserved: -prev_cost_total.cost_unreserved,
                     source: CostSource::Secondary,
                 });
@@ -149,9 +152,9 @@ pub fn display_cost_by_filter(
     }
 
     println!(
-        "Total cost {cur} {total_cost}  date:'{display_date}' Region:'{s_location}'",
-        cur = cur,
-        total_cost = f64_to_currency(total_cost, 2).bold(),
+        "Total cost {total_cost}  ({total_cost_usd})  date:'{display_date}' Region:'{s_location}'",
+        total_cost = format!("{total_cost}").bold(),
+        total_cost_usd = format!("{total_cost_usd}").bold(),
         display_date = display_date,
         s_location = s_location,
     );
@@ -272,11 +275,11 @@ fn sort_calc_total<'a>(
         .iter()
         .filter_map(|((grp, name), cost)| {
             if grp == cost_type {
-                total += cost.cost;
+                total += cost.cost.amount();
                 total_unreserved += cost.cost_unreserved;
                 cnt += 1;
                 // return some or none
-                Some((cost.cost, cost.cost_unreserved, name.as_str(), cost.source))
+                Some((cost.cost.amount(), cost.cost_unreserved, name.as_str(), cost.source))
             } else {
                 None
             }

@@ -4,6 +4,7 @@ use crate::bills::bills_sum_data::{CostSource, CostTotal};
 use crate::bills::cost_type_enum::CostType;
 // use crate::bills::ReservationInfo;
 use crate::bills::bills_sum_data::SummaryData;
+use crate::money::{Nzd, Usd};
 // use crate::RESERVATION_SUMMARY;
 use regex::RegexBuilder; // lib.rs static RESERVATION_SUMMARY
 
@@ -59,7 +60,7 @@ impl Bills {
         // bill_details record cost per filter category e.g. name_regex, rg_regex, subs_regex, meter_category
         // per_type
         // iter through bills, get total and update new bill_details for each category.
-        let filtered_total = self.bills.iter().fold(0.0, |acc, bill| {
+        let filtered_total = self.bills.iter().fold((Nzd::default(), Usd::default()), |acc, bill| {
             let mut flag_match = true;
             if !name_regex.is_empty() && !re_name.is_match(&bill.resource_name) {
                 flag_match = false; // if filter set and no match skip
@@ -108,15 +109,8 @@ impl Bills {
                         bill.effective_price, bill.cost, bill.resource_name, bill.date, bill.resource_group, bill.line_number_csv,
                     );
                 } else {
-                    assert_eq!(
-                        (bill.cost * 1000.0).round(),
-                        (bill.effective_price * bill.quantity * 1000.0).round(),
-                        "effective_price mismatch ResName:'{}' date:{} RG:'{}' line_csv:{}",
-                        bill.resource_name,
-                        bill.date,
-                        bill.resource_group,
-                        bill.line_number_csv,
-                    );
+                    // Note: effective_price is in the pricing currency; cost is in the billing
+                    // currency (NZD). With FX conversion these are not equal, so no assertion here.
                 };
 
                 summary_data
@@ -124,10 +118,12 @@ impl Bills {
                     .entry((CostType::ResourceName, bill.resource_name.clone()))
                     .and_modify(|e| {
                         e.cost += bill.cost;
+                        e.cost_usd += bill.cost_usd;
                         e.cost_unreserved += cost_unreserved;
                     })
                     .or_insert(CostTotal {
                         cost: bill.cost,
+                        cost_usd: bill.cost_usd,
                         cost_unreserved: cost_unreserved,
                         source: CostSource::Original,
                     });
@@ -137,10 +133,12 @@ impl Bills {
                     .entry((CostType::ResourceGroup, bill.resource_group.clone()))
                     .and_modify(|e| {
                         e.cost += bill.cost;
+                        e.cost_usd += bill.cost_usd;
                         e.cost_unreserved += cost_unreserved;
                     })
                     .or_insert(CostTotal {
                         cost: bill.cost,
+                        cost_usd: bill.cost_usd,
                         cost_unreserved: cost_unreserved,
                         source: CostSource::Original,
                     });
@@ -150,10 +148,12 @@ impl Bills {
                     .entry((CostType::Subscription, bill.subscription_name.clone()))
                     .and_modify(|e| {
                         e.cost += bill.cost;
+                        e.cost_usd += bill.cost_usd;
                         e.cost_unreserved += cost_unreserved;
                     })
                     .or_insert(CostTotal {
                         cost: bill.cost,
+                        cost_usd: bill.cost_usd,
                         cost_unreserved: cost_unreserved,
                         source: CostSource::Original,
                     });
@@ -163,10 +163,12 @@ impl Bills {
                     .entry((CostType::MeterCategory, bill.meter_category.clone()))
                     .and_modify(|e| {
                         e.cost += bill.cost;
+                        e.cost_usd += bill.cost_usd;
                         e.cost_unreserved += cost_unreserved;
                     })
                     .or_insert(CostTotal {
                         cost: bill.cost,
+                        cost_usd: bill.cost_usd,
                         cost_unreserved: cost_unreserved,
                         source: CostSource::Original,
                     });
@@ -176,10 +178,12 @@ impl Bills {
                     .entry((CostType::Reservation, bill.benefit_name.clone()))
                     .and_modify(|e| {
                         e.cost += bill.cost;
+                        e.cost_usd += bill.cost_usd;
                         e.cost_unreserved += cost_unreserved;
                     })
                     .or_insert(CostTotal {
                         cost: bill.cost,
+                        cost_usd: bill.cost_usd,
                         cost_unreserved: cost_unreserved,
                         source: CostSource::Original,
                     });
@@ -190,10 +194,12 @@ impl Bills {
                     .entry((CostType::Region, region.to_string()))
                     .and_modify(|e| {
                         e.cost += bill.cost;
+                        e.cost_usd += bill.cost_usd;
                         e.cost_unreserved += cost_unreserved;
                     })
                     .or_insert(CostTotal {
                         cost: bill.cost,
+                        cost_usd: bill.cost_usd,
                         cost_unreserved: cost_unreserved,
                         source: CostSource::Original,
                     });
@@ -213,10 +219,12 @@ impl Bills {
                             .entry((CostType::Tag, format!("tag:{}={}", v.1, v.0)))
                             .and_modify(|e| {
                                 e.cost += bill.cost;
+                        e.cost_usd += bill.cost_usd;
                                 e.cost_unreserved += cost_unreserved;
                             })
                             .or_insert(CostTotal {
                                 cost: bill.cost,
+                        cost_usd: bill.cost_usd,
                                 cost_unreserved: cost_unreserved,
                                 source: CostSource::Original,
                             });
@@ -227,10 +235,12 @@ impl Bills {
                             .entry((CostType::Tag, "tag:none".to_string()))
                             .and_modify(|e| {
                                 e.cost += bill.cost;
+                        e.cost_usd += bill.cost_usd;
                                 e.cost_unreserved += cost_unreserved;
                             })
                             .or_insert(CostTotal {
                                 cost: bill.cost,
+                        cost_usd: bill.cost_usd,
                                 cost_unreserved: cost_unreserved,
                                 source: CostSource::Original,
                             });
@@ -242,10 +252,12 @@ impl Bills {
                         .entry((CostType::MeterSubCategory, format!("{}__{}", bill.meter_category, bill.meter_sub_category)))
                         .and_modify(|e| {
                             e.cost += bill.cost;
+                        e.cost_usd += bill.cost_usd;
                             e.cost_unreserved += cost_unreserved;
                         })
                         .or_insert(CostTotal {
                             cost: bill.cost,
+                        cost_usd: bill.cost_usd,
                             cost_unreserved: cost_unreserved,
                             source: CostSource::Original,
                         });
@@ -323,14 +335,15 @@ impl Bills {
                     mc = bill.meter_category.clone(),
                     rn = bill.resource_name.clone(),
                 ));
-                acc + bill.cost
+                (acc.0 + bill.cost, acc.1 + bill.cost_usd)
             } else {
                 acc
             }
         }); // end loop through bill entries
         //
         // bill_details should have same cost total for each category
-        summary_data.filtered_cost_total = filtered_total;
+        summary_data.filtered_cost_total = filtered_total.0;
+        summary_data.filtered_cost_total_usd = filtered_total.1;
         summary_data
     }
 }
@@ -340,6 +353,7 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::cmd_parse::GlobalOpts;
+    use crate::money::Nzd;
 
     // use super::*;
 
@@ -364,7 +378,7 @@ mod tests {
             result.err().unwrap()
         );
         let cost = bills.cost_by_resource_name("NLSYDWAVAP01P-OSdisk-00_ide_0_869850_GXMD_40cfb0");
-        assert_eq!(cost, 0.002785917);
+        assert_eq!(cost, Nzd(0.002785917));
     }
     #[test]
     fn test_parse_csv() {
@@ -401,6 +415,6 @@ mod tests {
             "meter_name mismatch"
         );
         assert_eq!(first_bill.quantity, 0.194368534, "quantity mismatch");
-        assert_eq!(first_bill.cost, 0.003025655, "cost mismatch");
+        assert_eq!(first_bill.cost, Nzd(0.003025655), "cost mismatch");
     }
 }

@@ -1,5 +1,6 @@
 pub mod az_disk;
 pub mod bills;
+pub mod money;
 use bills::Bills;
 use colored::Colorize;
 pub mod cmd_parse;
@@ -28,13 +29,12 @@ pub fn calc_subscription_cost(subscription: &str, file_or_folder: &Path, global_
     println!();
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
     // and print the cost
-    let cur = latest_bill.get_billing_currency();
-    let mut total_cost: f64 = 0.0;
+    let mut total_cost = money::Nzd::default();
     let (sub_cost, subs) = latest_bill.cost_by_subscription(subscription);
-    println!("cost {cur} {sub_cost:7.2} - subscription: '{subscription:?}' ");
+    println!("cost {sub_cost} - subscription: '{subscription:?}' ");
     total_cost += sub_cost;
     println!("    from file '{:?}'", bill_file_name);
-    println!("Total cost {cur} {total_cost:.2} subs:{:?}", subs);
+    println!("Total cost {total_cost} subs:{:?}", subs);
 }
 
 fn load_latest_bill(file_or_folder: &Path, global_opts: &GlobalOpts) -> (Bills, String) {
@@ -77,15 +77,14 @@ pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: &Path, global_opts: &
     );
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
     // and print the cost
-    let cur = latest_bill.get_billing_currency();
-    let mut total_cost: f64 = 0.0;
+    let mut total_cost = money::Nzd::default();
     for disk in &disks.disks {
         let disk_cost = latest_bill.cost_by_resource_name(&disk.name);
-        println!("cost {cur} {disk_cost:7.2} - disk: {:?} ", disk.name);
+        println!("cost {disk_cost} - disk: {:?} ", disk.name);
         total_cost += disk_cost;
     }
     println!("    from file '{:?}'", file_name_bill);
-    println!("Total cost {cur} {total_cost:.2}");
+    println!("Total cost {total_cost}");
 }
 
 pub fn load_bill(file_or_folder: &Path, global_opts: &GlobalOpts) -> (Bills, String) {

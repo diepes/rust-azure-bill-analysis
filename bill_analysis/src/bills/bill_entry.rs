@@ -2,51 +2,81 @@ use regex::Regex;
 use serde::Deserialize;
 use std::hash::Hash;
 
-// 1brc speedup
-// pub mod calc;
 use crate::bills::tags::Tags;
+use crate::money::{Nzd, Usd};
 
 //struct to hold bill data for Azure detailed Enrollment csv parsed file
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "camelCase")]
 #[allow(unused)]
 pub struct BillEntry {
-    // SubscriptionId
+    #[serde(alias = "SubscriptionId")]
     pub subscription_id: String,
+    #[serde(alias = "SubscriptionName")]
     pub subscription_name: String,
+    #[serde(alias = "Date")]
     pub date: String,
+    #[serde(alias = "Product")]
     pub product: String,
+    #[serde(alias = "MeterId")]
     pub meter_id: String,
-    pub meter_category: String,     // e.g. "Virtual Network"
-    pub meter_sub_category: String, // e.g. "Peering"
-    pub meter_name: String,         // e.g. "Intra-Region Ingress"
+    #[serde(alias = "MeterCategory")]
+    pub meter_category: String,
+    #[serde(alias = "MeterSubCategory")]
+    pub meter_sub_category: String,
+    #[serde(alias = "MeterName")]
+    pub meter_name: String,
+    #[serde(alias = "MeterRegion")]
     pub meter_region: String,
+    #[serde(alias = "Quantity")]
     pub quantity: f64,
-    pub effective_price: f64, // blended rate across tiers, actual rate, could be 0 for reservations
-    pub cost: f64,
-    // BillingCurrency
+    #[serde(alias = "EffectivePrice")]
+    pub effective_price: f64,
+    // Old format: "Cost", new format: "costInBillingCurrency" (NZD)
+    #[serde(rename = "costInBillingCurrency", alias = "Cost")]
+    pub cost: Nzd,
+    // USD cost — not present in old format test data, defaults to 0
+    #[serde(default, rename = "costInUsd")]
+    pub cost_usd: Usd,
+    // PAYG (list-price) costs — for savings calculations
+    #[serde(default, rename = "paygCostInBillingCurrency")]
+    pub payg_cost_nzd: Nzd,
+    #[serde(default, rename = "paygCostInUsd")]
+    pub payg_cost_usd: Usd,
+    #[serde(alias = "BillingCurrency")]
     pub billing_currency: String,
-    // UnitPrice,TotalUsedSavings,TotalUnused
-    pub unit_price: f64, // per-unit price at time of billing inc. negotiated discounts
+    #[serde(alias = "UnitPrice")]
+    pub unit_price: f64,
+    #[serde(alias = "ReservationName")]
     pub reservation_name: String,
+    #[serde(alias = "ResourceId")]
     pub resource_id: String,
+    // Not present in new format — populated from resource_id after parse
+    #[serde(default, alias = "ResourceName")]
     pub resource_name: String,
+    // Old format: "ResourceGroup", new format: "resourceGroupName"
+    #[serde(rename = "resourceGroupName", alias = "ResourceGroup")]
     pub resource_group: String,
+    #[serde(alias = "ResourceLocation")]
     pub resource_location: String,
-    // PlanName,ChargeType,Frequency
+    #[serde(alias = "PublisherName")]
     pub publisher_name: String,
+    // Not present in new format
+    #[serde(default, alias = "PlanName")]
     pub plan_name: String,
+    #[serde(alias = "ChargeType")]
     pub charge_type: String,
+    #[serde(alias = "Frequency")]
     pub frequency: String,
+    #[serde(alias = "PricingModel")]
     pub pricing_model: String,
-    // benefitId,benefitName
-    #[serde(rename = "benefitId")]
+    // Already camelCase in both old and new formats
     pub benefit_id: String,
-    #[serde(rename = "benefitName")]
     pub benefit_name: String,
+    #[serde(alias = "Tags")]
     pub tags: Tags,
     #[serde(skip_deserializing)]
-    pub line_number_csv: usize, // line number in csv file, added for debugging
+    pub line_number_csv: usize,
 }
 
 // Apply the macro to specify which fields are subject to lowercasing
@@ -123,6 +153,7 @@ impl Hash for BillEntry {
 #[cfg(test)]
 mod tests {
     use crate::cmd_parse::GlobalOpts;
+    use crate::money::Nzd;
     use std::path::PathBuf;
 
     static GLOBAL_OPTS: GlobalOpts = crate::GlobalOpts {
@@ -146,7 +177,7 @@ mod tests {
             result.err().unwrap()
         );
         let cost = bills.cost_by_resource_name("NLSYDWAVAP01P-OSdisk-00_ide_0_869850_GXMD_40cfb0");
-        assert_eq!(cost, 0.002785917);
+        assert_eq!(cost, Nzd(0.002785917));
     }
     #[test]
     fn test_parse_csv() {
@@ -183,6 +214,6 @@ mod tests {
             "meter_name mismatch"
         );
         assert_eq!(first_bill.quantity, 0.194368534, "quantity mismatch");
-        assert_eq!(first_bill.cost, 0.003025655, "cost mismatch");
+        assert_eq!(first_bill.cost, Nzd(0.003025655), "cost mismatch");
     }
 }

@@ -1,11 +1,13 @@
 use crate::bills::Bills;
 use crate::cmd_parse::GlobalOpts;
 use crate::find_files;
+use crate::money::{Nzd, Usd};
 use std::collections::HashMap;
 use std::path::Path;
 
 pub struct Summary {
-    pub total_cost: f64,
+    pub total_cost: Nzd,
+    pub total_cost_usd: Usd,
     pub total_no_reservation: f64,
     pub total_effective: f64,
     pub total_savings_used: f64,

@@ -60,6 +60,15 @@ impl Bills {
                 );
             }
             let mut bill: BillEntry = result?;
+            // New format omits ResourceName — derive it from the last segment of resourceId
+            if bill.resource_name.is_empty() && !bill.resource_id.is_empty() {
+                bill.resource_name = bill
+                    .resource_id
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+            }
             if !global_opts.case_sensitive {
                 bill.lowercase_all_strings();
             }
@@ -101,7 +110,8 @@ impl Default for Bills {
             file_name: "NotSet".to_string(),
             file_short_name: "NotSet".to_string(),
             summary: summary::Summary {
-                total_cost: 0.0,
+                total_cost: crate::money::Nzd::default(),
+                total_cost_usd: crate::money::Usd::default(),
                 total_no_reservation: 0.0,
                 total_effective: 0.0,
                 total_savings_used: 0.0,
@@ -115,9 +125,8 @@ impl Default for Bills {
 #[cfg(test)]
 mod tests {
     use crate::cmd_parse::GlobalOpts;
+    use crate::money::Nzd;
     use std::path::PathBuf;
-
-    // use super::*;
 
     static GLOBAL_OPTS: GlobalOpts = crate::GlobalOpts {
         debug: false,
@@ -140,7 +149,7 @@ mod tests {
             result.err().unwrap()
         );
         let cost = bills.cost_by_resource_name("NLSYDWAVAP01P-OSdisk-00_ide_0_869850_GXMD_40cfb0");
-        assert_eq!(cost, 0.002785917);
+        assert_eq!(cost, Nzd(0.002785917));
     }
     #[test]
     fn test_parse_csv() {
@@ -177,6 +186,6 @@ mod tests {
             "meter_name mismatch"
         );
         assert_eq!(first_bill.quantity, 0.194368534, "quantity mismatch");
-        assert_eq!(first_bill.cost, 0.003025655, "cost mismatch");
+        assert_eq!(first_bill.cost, Nzd(0.003025655), "cost mismatch");
     }
 }
