@@ -97,23 +97,18 @@ pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts
         "\n===  Displaying Azure cost summary.  {description} {} ===",
         bills.file_short_name
     );
-    let cur = bills.get_billing_currency();
+    let t_cost_nzd = &bills.summary.total_cost;
+    let t_cost_usd = &bills.summary.total_cost_usd;
     let t_sav_used = bills.total_used_savings();
     let c_sav_used = f64_to_currency(t_sav_used, 2);
     let t_sav_unused = bills.total_unused_savings();
     let c_sav_unused = f64_to_currency(t_sav_unused, 2);
-    let t_effective = bills.total_effective();
-    let t_no_reservation = bills.total_no_reservation();
     println!(
-        "Total cost {cur} {c_cost} + res_save {cur} {c_sav_used} + res_unused {cur} {c_sav_unused} = no_reservation {cur} {c_no_reservation} + err {cur} {err}",
-        c_cost = f64_to_currency(t_effective, 2).red().bold(),
-        c_no_reservation = f64_to_currency(t_no_reservation, 2).bold(),
+        "Total cost {t_cost_nzd}  ({t_cost_usd})  [savings approx. USD: res_save US$ {c_sav_used} + res_unused US$ {c_sav_unused}]",
+        t_cost_nzd = format!("{t_cost_nzd}").red().bold(),
+        t_cost_usd = format!("{t_cost_usd}").bold(),
         c_sav_unused = c_sav_unused.on_red(),
         c_sav_used = c_sav_used.yellow(),
-        err = f64_to_currency(
-            t_effective + t_sav_used + t_sav_unused - t_no_reservation,
-            2
-        ),
     );
     // TODO: print filtered total cost
 
@@ -133,16 +128,14 @@ pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts
             continue;
         }
         println!(
-            "  Savings by meter_category:{meter_category:>32} {cur} {savings:>10} and Unused {cur} {unused_savings:<8}",
+            "  Savings by meter_category:{meter_category:>32} US$ {savings:>10} and Unused US$ {unused_savings:<8}",
             meter_category = format!("'{}'", meter_category),
-            cur = cur,
             savings = c_savings.yellow(),
             unused_savings = c_unused_savings.red(),
         );
     }
     println!(
-        "  Savings Total {cur} {total_savings} Unused {total_unused_savings}",
-        cur = cur,
+        "  Savings Total US$ {total_savings} Unused {total_unused_savings}",
         total_savings = f64_to_currency(total_savings, 2).yellow(),
         total_unused_savings = f64_to_currency(total_unused_savings, 2).red(),
     );

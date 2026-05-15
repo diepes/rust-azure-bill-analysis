@@ -262,34 +262,29 @@ pub fn display_cost_by_filter(
 }
 
 fn sort_calc_total<'a>(
-    //bill_details: &'a std::collections::HashMap<(CostType, String), CostTotal>,
     bill_details: &'a SummaryData,
     cost_type: &CostType,
-) -> (f64, f64, i32, Vec<(f64, f64, &'a str, CostSource)>) {
+) -> (f64, f64, i32, Vec<(f64, &'a str, CostSource)>) {
     let mut total = 0.0;
-    let mut total_unreserved = 0.0;
+    let mut total_usd = 0.0;
     let mut cnt = 0;
-    // create Vec from HashMap for specific CostType
-    let mut bill_details_sorted: Vec<(f64, f64, &str, CostSource)> = bill_details
+    let mut bill_details_sorted: Vec<(f64, &str, CostSource)> = bill_details
         .per_type
         .iter()
         .filter_map(|((grp, name), cost)| {
             if grp == cost_type {
                 total += cost.cost.amount();
-                total_unreserved += cost.cost_unreserved;
+                total_usd += cost.cost_usd.amount();
                 cnt += 1;
-                // return some or none
-                Some((cost.cost.amount(), cost.cost_unreserved, name.as_str(), cost.source))
+                Some((cost.cost.amount(), name.as_str(), cost.source))
             } else {
                 None
             }
         })
         .collect();
-    // sort Vec by cost
     bill_details_sorted
-        .sort_by(|(a, _resa, _na, _srca), (b, _resb, _nb, _srcb)| a.partial_cmp(b).unwrap());
-    //
-    (total, total_unreserved, cnt, bill_details_sorted)
+        .sort_by(|(a, _na, _srca), (b, _nb, _srcb)| a.partial_cmp(b).unwrap());
+    (total, total_usd, cnt, bill_details_sorted)
 }
 
 /// print_summary for Subscription, ResourceGroup, ResourceName, MeterCategory
@@ -300,40 +295,34 @@ fn print_summary(
     cost_type: CostType,
     global_opts: &GlobalOpts,
 ) {
-    let (total, total_unreserved, cnt, bill_details_sorted) =
+    let (total, total_usd, cnt, bill_details_sorted) =
         sort_calc_total(bill_summary, &cost_type);
     let mut cnt_skip = 0;
 
     let color_legend = if global_opts.bill_prev_subtract_path.is_none() {
-        "".to_string()
+        format!("Legend: {cyan}", cyan = "Cyan=Credit/Refund(negative)".cyan())
     } else {
         format!(
-            "Legend: cost colour's {red} {green} {blue} {yellow}",
+            "Legend: cost colour's {red} {green} {blue} {cyan}",
             red = "Red=Original(New)".red(),
             green = "Green=Previous(Gone)".green(),
             blue = "Blue=Combined(Changed)".blue(),
-            yellow = "Yellow=ReservationSavings".yellow(),
+            cyan = "Cyan=Credit/Refund(negative)".cyan(),
         )
     };
-    let mut cost_double_check = 0.0;
     // print sorted Vec by cost
-    for (cost, cost_unreserved, name, source) in bill_details_sorted.iter() {
-        cost_double_check += *cost_unreserved;
+    for (cost, name, source) in bill_details_sorted.iter() {
         let currency = f64_to_currency(*cost, 2);
-        let _cur_unreserved = f64_to_currency(*cost_unreserved, 2);
-        let savings = *cost_unreserved - *cost;
-        let cur_savings = f64_to_currency(savings, 2);
         let part1 = format!("{cur} {currency:>11}");
-        let part2 = if savings > 1.0 {
-            format!("+{cur_savings:>9}")
-        } else {
-            "".to_string()
-        };
 
-        let color_cost = match source {
-            CostSource::Original => format!("{} {:>11}", part1.red(), part2.yellow()),
-            CostSource::Secondary => format!("{} {:>11}", part1.green(), part2.yellow()),
-            CostSource::Combined => format!("{} {:>11}", part1.blue(), part2.yellow()),
+        let color_cost = if *cost < 0.0 {
+            part1.cyan().to_string()
+        } else {
+            match source {
+                CostSource::Original => part1.red().to_string(),
+                CostSource::Secondary => part1.green().to_string(),
+                CostSource::Combined => part1.blue().to_string(),
+            }
         };
         if *cost > global_opts.cost_min_display || *cost < -global_opts.cost_min_display {
             println!(
@@ -352,20 +341,16 @@ fn print_summary(
         );
     }
     if cnt > 0 {
-        let cost_err = total_unreserved - cost_double_check;
+        let total_colored = if total < 0.0 {
+            f64_to_currency(total, 2).cyan().bold().to_string()
+        } else {
+            f64_to_currency(total, 2).red().bold().to_string()
+        };
         println!(
-            "     Total #{cnt} {cost_type} filtered cost {cur} {total} + {cur} {resrv_savings} = {cur} {total_unreserved} Err:{cost_err}",
+            "     Total #{cnt} {cost_type} filtered cost {cur} {total_colored}  (US$ {total_usd})",
             cost_type = cost_type.as_str(),
             cur = cur,
-            // total = (total as i64).to_formatted_string(&Locale::en).bold(),
-            total = f64_to_currency(total, 2).red().bold(),
-            total_unreserved = f64_to_currency(total_unreserved, 2).bold(),
-            resrv_savings = f64_to_currency(total_unreserved - total, 2).yellow(),
-            cost_err = if cost_err.abs() < 0.001 {
-                "-".red()
-            } else {
-                format!("CostError: {:.2}", cost_err).red().bold()
-            },
+            total_usd = f64_to_currency(total_usd, 2).bold(),
         );
         println!("     {color_legend}");
     }

@@ -38,7 +38,7 @@ impl Bills {
                 len = self.len(),
             );
             //println!("{:?}", bills[0]);
-            let cur = self.get_billing_currency();
+        let cur = "US$"; // savings are computed from effectivePrice/unitPrice which are USD
             println!(
                 "Total no_reservation {:.2} {cur}  -  Total effective {:.2} {cur}  = {savings:.2} {cur} Savings/month {save_percent:.1}% . [Unused Savings: {unused:.2} {cur}]",
                 self.total_no_reservation(),

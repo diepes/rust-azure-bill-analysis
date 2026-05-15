@@ -101,14 +101,23 @@ lowercase_all_strings!(
 //
 
 pub fn extract_date_from_file_name(file_path: &str) -> String {
-    // Define the regex pattern to match a date of the format _YYYYMM_
+    // Prefer the parent directory name if it starts with a date pattern (YYYY-MM or YYYYMM).
+    // Folder names like "2026-04_G156087700" are set by the user and reflect the real billing
+    // month, whereas the CSV file name may contain a different period code (e.g. "202605").
+    if let Some(parent) = std::path::Path::new(file_path).parent() {
+        if let Some(dir_name) = parent.file_name().and_then(|n| n.to_str()) {
+            let re_folder = Regex::new(r"^(\d{4}-\d{2}|\d{6})").unwrap();
+            if let Some(caps) = re_folder.captures(dir_name) {
+                return caps[1].to_string();
+            }
+        }
+    }
+    // Fall back: extract _YYYYMM_ from the file name itself
     let re = Regex::new(r"_(\d{6})_").unwrap();
-
-    // Attempt to find a match for the date
     if let Some(caps) = re.captures(file_path) {
-        caps[1].to_string() // Return the matched date (group 1)
+        caps[1].to_string()
     } else {
-        file_path.to_string() // Return None if no match is found
+        file_path.to_string()
     }
 }
 
