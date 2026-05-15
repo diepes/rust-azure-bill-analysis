@@ -65,7 +65,7 @@ pub struct GlobalOpts {
     /// Activate debug mode
     #[arg(short, long)]
     pub debug: bool,
-    #[arg(short, long, default_value = "csv_data")]
+    #[arg(short, long)]
     pub bill_path: Option<PathBuf>,
     #[arg(long, default_value = None)]
     pub bill_prev_subtract_path: Option<PathBuf>,

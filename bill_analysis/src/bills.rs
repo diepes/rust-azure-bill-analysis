@@ -114,7 +114,6 @@ impl Default for Bills {
 
 #[cfg(test)]
 mod tests {
-    use crate::bills::bill_entry::BillEntry;
     use crate::cmd_parse::GlobalOpts;
     use std::path::PathBuf;
 
@@ -133,17 +132,13 @@ mod tests {
     fn test_cost_by_resource_name() {
         let global_opts = &GLOBAL_OPTS;
         let file_name: PathBuf = PathBuf::from("tests/azure_test_data_01.csv");
-        let result = BillEntry::parse_csv(&file_name, &global_opts);
-        // Assert that parsing was successful
+        let mut bills = super::Bills::default();
+        let result = bills.parse_csv(&file_name, global_opts);
         assert!(
             result.is_ok(),
             "!Error parsing the file:'{file_name:?}'\nERR:{}",
             result.err().unwrap()
         );
-        // Get the parsed bills
-        let bills = result.unwrap();
-
-        // Test the cost_by_resource_name function
         let cost = bills.cost_by_resource_name("NLSYDWAVAP01P-OSdisk-00_ide_0_869850_GXMD_40cfb0");
         assert_eq!(cost, 0.002785917);
     }
@@ -151,27 +146,15 @@ mod tests {
     fn test_parse_csv() {
         let global_opts = &GLOBAL_OPTS;
         let file_name: PathBuf = PathBuf::from("tests/azure_test_data_01.csv");
-        // Test file path
-        let file_path = &file_name;
-
-        // Parse the CSV file
-        let result = BillEntry::parse_csv(file_path, &global_opts);
-
-        // Assert that parsing was successful
+        let mut bills = super::Bills::default();
+        let result = bills.parse_csv(&file_name, global_opts);
         assert!(
             result.is_ok(),
             "!Error parsing the file:'{file_name:?}'\nERR:{}",
             result.err().unwrap()
         );
-
-        // Get the parsed bills
-        let bills = result.unwrap().bills;
-
-        // Assert that the number of bills is correct
-        assert_eq!(bills.len(), 8);
-
-        // Assert the values of the first bill
-        let first_bill = &bills[0];
+        assert_eq!(bills.bills.len(), 8);
+        let first_bill = &bills.bills[0];
         assert_eq!(
             first_bill.subscription_id, "fc123456-7890-1234-5678-901234567890",
             "subscription_id mismatch"
@@ -189,12 +172,11 @@ mod tests {
             first_bill.meter_id, "59bc01e3-test-4b9f-bacf-35e696aad6d4",
             "meter_id mismatch"
         );
-
         assert_eq!(
             first_bill.meter_name, "Intra-Region Ingress",
             "meter_name mismatch"
         );
-        assert_eq!(first_bill.quantity, (0.194368534), "quantity mismatch");
-        assert_eq!(first_bill.cost, (0.003025655), "cost mismatch");
+        assert_eq!(first_bill.quantity, 0.194368534, "quantity mismatch");
+        assert_eq!(first_bill.cost, 0.003025655, "cost mismatch");
     }
 }

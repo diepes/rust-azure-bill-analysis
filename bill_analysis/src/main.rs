@@ -19,8 +19,8 @@ fn main() {
     match app.command {
         Some(Commands::BillSummary(args)) => {
             println!("Running BillSummary command {:?}", args);
-            // bill_analysis::calc_bill_summary(&bill_path, &app.global_opts);
-            let bill_path = app.global_opts.bill_path.clone().unwrap();
+            let bill_path = app.global_opts.bill_path.clone()
+                .unwrap_or_else(|| std::path::PathBuf::from(bill_analysis::find_files::last_month_shorthand()));
             let (mut latest_bill, _file_name) =
                 bill_analysis::load_bill(&bill_path, &app.global_opts);
             latest_bill.summary(&bill_path, &app.global_opts);
@@ -31,7 +31,7 @@ fn main() {
                 &app.global_opts
                     .bill_path
                     .clone()
-                    .expect("Bill path not set ?"),
+                    .unwrap_or_else(|| std::path::PathBuf::from(bill_analysis::find_files::last_month_shorthand())),
                 &app.global_opts,
             );
         }
@@ -40,8 +40,12 @@ fn main() {
                 println!("No command specified #1 {:?}", app);
                 println!("No command specified #2 {:?}", app.name_regex);
             }
-            // Read latest_bill from file_name csv file.
-            let bill_path = app.global_opts.bill_path.clone().unwrap();
+            let bill_path = app.global_opts.bill_path.clone()
+                .unwrap_or_else(|| {
+                    let default = bill_analysis::find_files::last_month_shorthand();
+                    println!("No --bill-path specified, defaulting to last month: {default}");
+                    std::path::PathBuf::from(default)
+                });
             let (latest_bill, file_name) = bill_analysis::load_bill(&bill_path, &app.global_opts);
             println!("Loaded latest bill from '{:?}'", file_name);
             bill_analysis::display_total_cost_summary(

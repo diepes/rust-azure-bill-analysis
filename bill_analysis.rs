@@ -1,1 +1,0 @@
-./bill_analysis/target/release/bill_analysis

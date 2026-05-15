@@ -38,15 +38,17 @@ pub fn calc_subscription_cost(subscription: &str, file_or_folder: &Path, global_
 }
 
 fn load_latest_bill(file_or_folder: &Path, global_opts: &GlobalOpts) -> (Bills, String) {
+    let resolved = find_files::resolve_date_shorthand(file_or_folder);
+    let file_or_folder = resolved.as_path();
     let file_bill: PathBuf = if file_or_folder.is_file() {
         file_or_folder.to_path_buf()
     } else {
         let (path, files) = find_files::in_folder(
             file_or_folder,
-            r"Detail_Enrollment_70785102_.*_en.csv$",
+            r".*Detail.*\.csv$",
             global_opts,
         );
-        path.join(files.last().unwrap())
+        path.join(files.last().expect("No files found"))
     };
     println!("Loading bill from '{:?}'", file_bill);
     let mut latest_bill: Bills = Bills::default();

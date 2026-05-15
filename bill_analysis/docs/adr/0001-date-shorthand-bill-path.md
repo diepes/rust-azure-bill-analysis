@@ -1,0 +1,3 @@
+# Date Shorthand for Bill Path
+
+When `--bill-path` (or `--bill-prev-subtract-path`) starts with `YYYY-MM` or `YYYYMM`, the tool resolves it as a date shorthand against the hardcoded `csv_data/` base directory rather than treating it as a literal path. Resolution tries `csv_data/{YYYY-MM}*/` then `csv_data/{YYYYMM}*/` (subdirectory), then the same prefixes for `.csv` files directly in `csv_data/`. This avoids adding a separate `--bill-base` option while still letting users type `--bill-path 2025-10` instead of a full path. Full paths (anything not starting with the date pattern) are passed through unchanged.
