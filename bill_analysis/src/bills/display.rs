@@ -152,7 +152,7 @@ pub fn display_cost_by_filter(
     }
 
     println!(
-        "Total cost {total_cost}  ({total_cost_usd})  date:'{display_date}' Region:'{s_location}'",
+        "Total cost excl. GST {total_cost}  ({total_cost_usd})  date:'{display_date}' Region:'{s_location}'",
         total_cost = format!("{total_cost}").bold(),
         total_cost_usd = format!("{total_cost_usd}").bold(),
         display_date = display_date,

@@ -112,6 +112,7 @@ impl Default for Bills {
             summary: summary::Summary {
                 total_cost: crate::money::Nzd::default(),
                 total_cost_usd: crate::money::Usd::default(),
+                exchange_rate: 0.0,
                 total_no_reservation: 0.0,
                 total_effective: 0.0,
                 total_savings_used: 0.0,

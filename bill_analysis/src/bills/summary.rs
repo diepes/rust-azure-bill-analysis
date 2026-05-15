@@ -8,6 +8,7 @@ use std::path::Path;
 pub struct Summary {
     pub total_cost: Nzd,
     pub total_cost_usd: Usd,
+    pub exchange_rate: f64,       // pricing currency (USD) → billing currency (NZD)
     pub total_no_reservation: f64,
     pub total_effective: f64,
     pub total_savings_used: f64,

@@ -64,6 +64,11 @@ impl Bills {
         self.summary = Summary {
             total_cost,
             total_cost_usd,
+            exchange_rate: if total_cost_usd.amount() != 0.0 {
+                total_cost.amount() / total_cost_usd.amount()
+            } else {
+                0.0
+            },
             total_no_reservation,
             total_effective,
             total_savings_used,

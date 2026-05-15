@@ -99,6 +99,10 @@ pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts
     );
     let t_cost_nzd = &bills.summary.total_cost;
     let t_cost_usd = &bills.summary.total_cost_usd;
+    let exchange_rate = bills.summary.exchange_rate;
+    let gst_rate = 0.15_f64;
+    let tax_nzd = t_cost_nzd.amount() * gst_rate;
+    let total_incl_tax = t_cost_nzd.amount() * (1.0 + gst_rate);
     let t_sav_used = bills.total_used_savings();
     let c_sav_used = f64_to_currency(t_sav_used, 2);
     let t_sav_unused = bills.total_unused_savings();
@@ -110,6 +114,17 @@ pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts
         c_sav_unused = c_sav_unused.on_red(),
         c_sav_used = c_sav_used.yellow(),
     );
+    println!(
+        "  GST (15%)  NZ$ {tax}  →  Total incl. GST  NZ$ {total_incl}",
+        tax = f64_to_currency(tax_nzd, 2).yellow(),
+        total_incl = f64_to_currency(total_incl_tax, 2).red().bold(),
+    );
+    if exchange_rate > 0.0 {
+        println!(
+            "  Exchange rate  1 USD = {rate:.10} NZD  (derived from costInBillingCurrency / costInUsd)",
+            rate = exchange_rate,
+        );
+    }
     // TODO: print filtered total cost
 
     // print details of the savings
