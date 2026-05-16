@@ -306,7 +306,7 @@ mod tests {
             first_bill.subscription_name, "TstNl",
             "subscription_name mismatch"
         );
-        assert_eq!(first_bill.date, "03/08/2024", "date mismatch");
+        assert_eq!(first_bill.date, "2024-03-08", "date mismatch");
         assert_eq!(
             first_bill.product, "TestVirtNet-Intra-Region",
             "product mismatch"

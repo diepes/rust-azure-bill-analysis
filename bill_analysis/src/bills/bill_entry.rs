@@ -1,12 +1,12 @@
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::hash::Hash;
 
 use crate::bills::tags::Tags;
 use crate::money::{Nzd, Usd};
 
 //struct to hold bill data for Azure detailed Enrollment csv parsed file
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(unused)]
 pub struct BillEntry {
@@ -14,7 +14,7 @@ pub struct BillEntry {
     pub subscription_id: String,
     #[serde(alias = "SubscriptionName")]
     pub subscription_name: String,
-    #[serde(alias = "Date")]
+    #[serde(alias = "Date", deserialize_with = "deserialize_date")]
     pub date: String,
     #[serde(alias = "Product")]
     pub product: String,
@@ -102,6 +102,27 @@ lowercase_all_strings!(
     tags
 );
 //
+
+/// Convert a CSV date value to ISO 8601 (YYYY-MM-DD).
+///
+/// The Azure Detailed CSV stores dates as `MM/DD/YYYY`. We normalise to
+/// `YYYY-MM-DD` on ingest so the rest of the code never sees the raw format.
+/// Any value that doesn't match the expected pattern is kept as-is.
+fn deserialize_date<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let s = String::deserialize(d)?;
+    // Fast path: already ISO (YYYY-MM-DD)
+    if s.len() == 10 && s.as_bytes().get(4) == Some(&b'-') {
+        return Ok(s);
+    }
+    // Convert MM/DD/YYYY → YYYY-MM-DD
+    if s.len() == 10 && s.as_bytes().get(2) == Some(&b'/') && s.as_bytes().get(5) == Some(&b'/') {
+        let mm = &s[0..2];
+        let dd = &s[3..5];
+        let yyyy = &s[6..10];
+        return Ok(format!("{yyyy}-{mm}-{dd}"));
+    }
+    Ok(s)
+}
 
 pub fn extract_date_from_file_name(file_path: &str) -> String {
     // Prefer the parent directory name if it starts with a date pattern (YYYY-MM or YYYYMM).
@@ -203,7 +224,7 @@ mod tests {
             first_bill.subscription_name, "TstNl",
             "subscription_name mismatch"
         );
-        assert_eq!(first_bill.date, "03/08/2024", "date mismatch");
+        assert_eq!(first_bill.date, "2024-03-08", "date mismatch");
         assert_eq!(
             first_bill.product, "TestVirtNet-Intra-Region",
             "product mismatch"

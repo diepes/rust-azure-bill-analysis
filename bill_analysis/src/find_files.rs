@@ -110,6 +110,82 @@ fn find_entry_with_prefix(base: &Path, prefix: &str, dir_only: bool) -> Option<P
     matches.into_iter().last()
 }
 
+/// Scan `data_dir` for subdirectories (or CSV files) whose names start with a `YYYY-MM`
+/// prefix and return a sorted, deduplicated list of `"YYYY-MM"` strings.
+pub fn list_bill_months(data_dir: &Path) -> Vec<String> {
+    let re = Regex::new(r"^(\d{4}-\d{2})").unwrap();
+    let mut months: Vec<String> = fs::read_dir(data_dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_str()?.to_string();
+            let caps = re.captures(&name)?;
+            Some(caps[1].to_string())
+        })
+        .collect();
+    months.sort();
+    months.dedup();
+    months
+}
+
+/// Find the first `Detail*.csv` file inside `data_dir` for the given `year_month`
+/// (`"YYYY-MM"` format). Looks for a subdirectory whose name starts with `year_month`,
+/// then returns the last alphabetically-sorted `Detail*.csv` inside it.
+/// Falls back to a CSV at the top level of `data_dir` whose name starts with `year_month`.
+pub fn find_bill_csv(data_dir: &Path, year_month: &str) -> Option<PathBuf> {
+    // First: find a subdirectory whose name starts with the year_month prefix
+    let subdir = fs::read_dir(data_dir)
+        .ok()?
+        .flatten()
+        .find(|e| {
+            let name = e.file_name().to_str().unwrap_or("").to_string();
+            e.path().is_dir() && name.starts_with(year_month)
+        })
+        .map(|e| e.path());
+
+    if let Some(dir) = subdir {
+        // Find the last Detail*.csv inside the subdirectory
+        let mut csvs: Vec<PathBuf> = fs::read_dir(&dir)
+            .ok()?
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name().to_str()?.to_string();
+                let path = e.path();
+                if path.is_file() && name.contains("Detail") && name.ends_with(".csv") {
+                    Some(path)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        csvs.sort();
+        return csvs.into_iter().last();
+    }
+
+    // Fallback: CSV directly in data_dir
+    let mut csvs: Vec<PathBuf> = fs::read_dir(data_dir)
+        .ok()?
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_str()?.to_string();
+            let path = e.path();
+            if path.is_file()
+                && name.starts_with(year_month)
+                && name.contains("Detail")
+                && name.ends_with(".csv")
+            {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect();
+    csvs.sort();
+    csvs.into_iter().last()
+}
+
 /// split path and search folder for files matching the path.file_name() or if not present with file_re_pattern
 pub fn in_folder(
     path: &Path,

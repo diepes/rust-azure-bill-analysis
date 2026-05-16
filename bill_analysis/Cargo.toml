@@ -3,6 +3,14 @@ name = "bill_analysis"
 version = "0.1.5-20251203"
 edition = "2024"
 
+[[bin]]
+name = "bill_analysis"
+path = "src/main.rs"
+
+[[bin]]
+name = "bill_analysis_mcp"
+path = "src/bin/mcp.rs"
+
 [dependencies]
 chrono = "0.4"
 clap = { version = "^4.5.4", features = ["derive"] }
@@ -12,3 +20,11 @@ memmap = "^0.7.0"
 once_cell = "^1.20.2"
 regex = "^1.10.4"
 serde = { version = "^1.0", features = ["derive"] }
+serde_json = "1"
+
+[dependencies.axum]
+version = "0.8"
+
+[dependencies.tokio]
+version = "1"
+features = ["full"]

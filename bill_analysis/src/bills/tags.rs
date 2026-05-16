@@ -4,7 +4,7 @@ use std::collections::HashMap;
 //use std::path::{Path, PathBuf};
 
 // Tag data deserialized from the CSV file
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Tags {
     // for each lowercase key, we save the value of the tag and the original key(With case)
     pub kv: HashMap<String, (String, String)>,
