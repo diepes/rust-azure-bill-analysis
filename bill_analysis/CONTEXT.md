@@ -34,11 +34,15 @@ A Rust CLI tool that parses **Azure "Detailed" cost export CSVs** (amortized/enr
 | **PreparedRow** | Display-ready row produced by `prepare_rows` — carries NZD cost, USD cost, name, colour label, and `CostSource`; internal to the display module |
 | **FilterOpts** | Subset of options relevant to filtering (`case_sensitive`); passed to `BillFilter::new()` |
 | **DisplayOpts** | Subset of options relevant to rendering (`cost_min_display`, `tag_list`, `debug`); passed to display functions |
+| **MCP** | Model Context Protocol — a standard for exposing tools to LLMs over HTTP |
+| **MCP tool** | A named function the LLM can invoke via MCP (e.g. `get_monthly_cost`) |
+| **BillCache** | Lazy in-memory cache mapping `YearMonth → Bills`; populated on first access, retained for the server lifetime |
+| **YearMonth** | A `(u32, u32)` year/month pair used as the cache key in `BillCache` |
 
 ## Architecture
 
 ```
-main.rs
+main.rs  (bill_analysis CLI)
   └─ cmd_parse::App (clap CLI)
        ├─ GlobalOpts  (--bill-path, --bill-prev-subtract-path, --cost-min-display, --case-sensitive, --debug, --tag-list)
        ├─ Filters     (--name-regex, --resource-group, --subscription, --meter-category, --location, --reservation, --tag-filter, --tag-summarise)
@@ -46,6 +50,14 @@ main.rs
             ├─ (default)        → load_bill → display_total_cost_summary → display_cost_by_filter
             ├─ BillSummary      → Bills::summary  (multi-file enrollment format)
             └─ DiskCsvSavings   → AzDisks::parse + cost_by_resource_name per disk
+
+src/bin/mcp.rs  (bill_analysis_mcp MCP server)
+  └─ axum POST /mcp  (Streamable HTTP, 2025 MCP spec)
+       ├─ BillCache (Arc<RwLock<HashMap<YearMonth, Bills>>>)
+       └─ Tools
+            ├─ list_available_months  → ["YYYY-MM", ...]
+            ├─ get_monthly_cost       → cost summary in USD
+            └─ get_daily_cost         → cost summary in USD
 ```
 
 ## Module Map
@@ -57,6 +69,8 @@ src/
 ├── cmd_parse.rs                   clap CLI structs (App, GlobalOpts, Commands)
 ├── find_files.rs                  Regex-based file discovery in a folder
 ├── az_disk.rs                     AzDisk / AzDisks — disk inventory parser (CSV or TXT)
+├── bin/
+│   └── mcp.rs                     MCP server binary (bill_analysis_mcp) — axum, Streamable HTTP
 └── bills/
     ├── bills.rs (mod)             Bills struct + parse_csv entry point
     ├── bill_entry.rs              BillEntry — single CSV row; serde PascalCase deserialise
