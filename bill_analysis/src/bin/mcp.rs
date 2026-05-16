@@ -1,15 +1,15 @@
 //! bill_analysis_mcp — MCP server exposing Azure billing data via Streamable HTTP.
 //!
-//! Implements the 2025 MCP spec (Streamable HTTP transport): a single `POST /mcp` endpoint
-//! that accepts JSON-RPC 2.0 requests and returns JSON responses.
+//! Implements the 2025 MCP spec (Streamable HTTP transport):
+//!   POST /mcp  — JSON-RPC 2.0 requests
+//!   GET  /mcp  — Health check, returns "Azure billing MCP ok"
 //!
-//! Usage: bill_analysis_mcp [--data-dir <path>] [--port <port>] [--host <host>]
-//!
-//! Defaults: data-dir = ./csv_data, port = 3000, host = 127.0.0.1
+//! Usage: bill_analysis_mcp --data-dir <path> [--port <port>] [--host <host>]
 
 use axum::{
     Router,
-    extract::State,
+    extract::{Request, State},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::post,
     Json,
@@ -28,8 +28,8 @@ use tokio::sync::RwLock;
 #[derive(Parser)]
 #[command(name = "bill_analysis_mcp", about = "MCP server for Azure billing cost data")]
 struct Args {
-    /// Directory containing billing CSV subfolders (default: ./csv_data)
-    #[arg(long, default_value = "./csv_data")]
+    /// Directory containing billing CSV subfolders
+    #[arg(long)]
     data_dir: PathBuf,
 
     /// TCP port to listen on (default: 3000)
@@ -93,13 +93,47 @@ impl RpcResponse {
 }
 
 // ---------------------------------------------------------------------------
+// GET /mcp — health / liveness probe
+// ---------------------------------------------------------------------------
+
+async fn mcp_get_handler() -> impl IntoResponse {
+    "Azure billing MCP ok"
+}
+
+// ---------------------------------------------------------------------------
+// HTTP request logging middleware
+// ---------------------------------------------------------------------------
+
+async fn log_request(req: Request, next: Next) -> Response {
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+    let is_probe = method == axum::http::Method::GET && uri.path() == "/mcp";
+    let start = Instant::now();
+    let resp = next.run(req).await;
+    if !is_probe {
+        eprintln!(
+            "[http] {} {} → {} in {:.1}ms",
+            method,
+            uri,
+            resp.status(),
+            start.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    resp
+}
+
+// ---------------------------------------------------------------------------
 // MCP request handler
 // ---------------------------------------------------------------------------
 
 async fn mcp_handler(State(state): State<AppState>, Json(req): Json<RpcRequest>) -> Response {
     let start = Instant::now();
     let method = req.method.as_str();
-    eprintln!("[mcp] → {method}");
+    if let Some(params) = &req.params {
+        eprintln!("[mcp] → {method} {}", params);
+    } else {
+        eprintln!("[mcp] → {method}");
+    }
 
     // Notifications have no `id` — acknowledge but send no body.
     if req.id.is_none() {
@@ -124,10 +158,19 @@ async fn mcp_handler(State(state): State<AppState>, Json(req): Json<RpcRequest>)
 // ---------------------------------------------------------------------------
 
 fn handle_initialize(req: &RpcRequest) -> RpcResponse {
+    // Echo the client's requested protocol version so we stay compatible as
+    // the MCP spec evolves, falling back to the last known version.
+    let protocol_version = req
+        .params
+        .as_ref()
+        .and_then(|p| p.get("protocolVersion"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("2025-11-25");
+
     RpcResponse::ok(
         req.id.clone(),
         json!({
-            "protocolVersion": "2025-03-26",
+            "protocolVersion": protocol_version,
             "capabilities": { "tools": {} },
             "serverInfo": {
                 "name": "bill_analysis_mcp",
@@ -652,7 +695,10 @@ async fn main() {
         data_dir: args.data_dir.clone(),
     };
 
-    let app = Router::new().route("/mcp", post(mcp_handler)).with_state(state);
+    let app = Router::new()
+        .route("/mcp", post(mcp_handler).get(mcp_get_handler))
+        .with_state(state)
+        .layer(middleware::from_fn(log_request));
 
     let addr = format!("{}:{}", args.host, args.port);
     eprintln!("[bill_analysis_mcp] listening on http://{addr}/mcp");
