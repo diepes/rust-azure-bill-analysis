@@ -1,12 +1,11 @@
+use crate::bills::bill_filter::BillFilter;
 use crate::bills::Bills;
 
-use crate::bills::bills_sum_data::{CostSource, CostTotal};
 use crate::bills::cost_type_enum::CostType;
 // use crate::bills::ReservationInfo;
 use crate::bills::bills_sum_data::SummaryData;
 use crate::money::{Nzd, Usd};
 // use crate::RESERVATION_SUMMARY;
-use regex::RegexBuilder; // lib.rs static RESERVATION_SUMMARY
 
 impl Bills {
     // function cost_by_any
@@ -17,49 +16,8 @@ impl Bills {
     //     and HashMap of filtered cost per category(each category total - total filtered cost)
     pub fn cost_by_any_summary(
         &self,
-        name_regex: &str,
-        rg_regex: &str,
-        subs_regex: &str,
-        meter_category: &str,
-        location_regex: &str,
-        reservation_regex: &str,
-        tag_summarise: &str,
-        tag_filter: &str,
-        invoice_section_regex: &str,
-        global_opts: &crate::GlobalOpts,
+        filter: &BillFilter,
     ) -> SummaryData<'_> {
-        let re_name = RegexBuilder::new(name_regex)
-            .case_insensitive(!global_opts.case_sensitive)
-            .build()
-            .expect("Invalid regex for name");
-        let re_rg = RegexBuilder::new(rg_regex)
-            .case_insensitive(!global_opts.case_sensitive)
-            .build()
-            .expect("Invalid regex for resource group");
-        let re_subs = RegexBuilder::new(subs_regex)
-            .case_insensitive(!global_opts.case_sensitive)
-            .build()
-            .expect("Invalid regex for subscription");
-        let re_type = RegexBuilder::new(meter_category)
-            .case_insensitive(!global_opts.case_sensitive)
-            .build()
-            .expect("Invalid regex for meter category");
-        let re_location = RegexBuilder::new(location_regex)
-            .case_insensitive(!global_opts.case_sensitive)
-            .build()
-            .expect("Invalid regex for location/region");
-        let re_reservation = RegexBuilder::new(reservation_regex)
-            .case_insensitive(!global_opts.case_sensitive)
-            .build()
-            .expect("Invalid regex for reservation");
-        let re_tag = RegexBuilder::new(tag_filter)
-            .case_insensitive(!global_opts.case_sensitive)
-            .build()
-            .expect("Invalid regex for tag");
-        let re_invoice_section = RegexBuilder::new(invoice_section_regex)
-            .case_insensitive(!global_opts.case_sensitive)
-            .build()
-            .expect("Invalid regex for invoice section");
         // collect set of resource groups in set rgs
         let mut summary_data = SummaryData::default();
         // bill_details record cost per filter category e.g. name_regex, rg_regex, subs_regex, meter_category
@@ -67,28 +25,28 @@ impl Bills {
         // iter through bills, get total and update new bill_details for each category.
         let filtered_total = self.bills.iter().fold((Nzd::default(), Usd::default()), |acc, bill| {
             let mut flag_match = true;
-            if !name_regex.is_empty() && !re_name.is_match(&bill.resource_name) {
+            if !filter.name.is_empty() && !filter.re_name.is_match(&bill.resource_name) {
                 flag_match = false; // if filter set and no match skip
-            } else if !rg_regex.is_empty() && !re_rg.is_match(&bill.resource_group) {
+            } else if !filter.resource_group.is_empty() && !filter.re_resource_group.is_match(&bill.resource_group) {
                 flag_match = false;
-            } else if !subs_regex.is_empty() && !re_subs.is_match(&bill.subscription_name) {
+            } else if !filter.subscription.is_empty() && !filter.re_subscription.is_match(&bill.subscription_name) {
                 flag_match = false;
-            } else if !meter_category.is_empty() && !re_type.is_match(&bill.meter_category) {
+            } else if !filter.meter_category.is_empty() && !filter.re_meter_category.is_match(&bill.meter_category) {
                 flag_match = false;
             // Check tags hashmap for match
-            } else if !tag_filter.is_empty() && !re_tag.is_match(&bill.tags.value) {
+            } else if !filter.tag_filter.is_empty() && !filter.re_tag_filter.is_match(&bill.tags.value) {
                 flag_match = false;
-            } else if !reservation_regex.is_empty() && !re_reservation.is_match(&bill.benefit_name)
+            } else if !filter.reservation.is_empty() && !filter.re_reservation.is_match(&bill.benefit_name)
             {
                 flag_match = false;
-            } else if !invoice_section_regex.is_empty()
-                && !re_invoice_section.is_match(&bill.invoice_section)
+            } else if !filter.invoice_section.is_empty()
+                && !filter.re_invoice_section.is_match(&bill.invoice_section)
             {
                 flag_match = false;
             } else if match (
-                location_regex,
-                location_regex.len(),
-                re_location.is_match(&bill.resource_location),
+                filter.location.as_str(),
+                filter.location.len(),
+                filter.re_location.is_match(&bill.resource_location),
                 bill.resource_location.len(),
             ) {
                 ("any" , _, _    , _) => false, // any(default) any region ok, leave flag_match unchanged
@@ -122,96 +80,54 @@ impl Bills {
                     // currency (NZD). With FX conversion these are not equal, so no assertion here.
                 };
 
-                summary_data
-                    .per_type
-                    .entry((CostType::ResourceName, bill.resource_name.clone()))
-                    .and_modify(|e| {
-                        e.cost += bill.cost;
-                        e.cost_usd += bill.cost_usd;
-                        e.cost_unreserved += cost_unreserved;
-                    })
-                    .or_insert(CostTotal {
-                        cost: bill.cost,
-                        cost_usd: bill.cost_usd,
-                        cost_unreserved: cost_unreserved,
-                        source: CostSource::Original,
-                    });
+                summary_data.accumulate(
+                    CostType::ResourceName,
+                    bill.resource_name.clone(),
+                    bill.cost,
+                    bill.cost_usd,
+                    cost_unreserved,
+                );
 
-                summary_data
-                    .per_type
-                    .entry((CostType::ResourceGroup, bill.resource_group.clone()))
-                    .and_modify(|e| {
-                        e.cost += bill.cost;
-                        e.cost_usd += bill.cost_usd;
-                        e.cost_unreserved += cost_unreserved;
-                    })
-                    .or_insert(CostTotal {
-                        cost: bill.cost,
-                        cost_usd: bill.cost_usd,
-                        cost_unreserved: cost_unreserved,
-                        source: CostSource::Original,
-                    });
+                summary_data.accumulate(
+                    CostType::ResourceGroup,
+                    bill.resource_group.clone(),
+                    bill.cost,
+                    bill.cost_usd,
+                    cost_unreserved,
+                );
 
-                summary_data
-                    .per_type
-                    .entry((CostType::Subscription, bill.subscription_name.clone()))
-                    .and_modify(|e| {
-                        e.cost += bill.cost;
-                        e.cost_usd += bill.cost_usd;
-                        e.cost_unreserved += cost_unreserved;
-                    })
-                    .or_insert(CostTotal {
-                        cost: bill.cost,
-                        cost_usd: bill.cost_usd,
-                        cost_unreserved: cost_unreserved,
-                        source: CostSource::Original,
-                    });
+                summary_data.accumulate(
+                    CostType::Subscription,
+                    bill.subscription_name.clone(),
+                    bill.cost,
+                    bill.cost_usd,
+                    cost_unreserved,
+                );
 
-                summary_data
-                    .per_type
-                    .entry((CostType::MeterCategory, bill.meter_category.clone()))
-                    .and_modify(|e| {
-                        e.cost += bill.cost;
-                        e.cost_usd += bill.cost_usd;
-                        e.cost_unreserved += cost_unreserved;
-                    })
-                    .or_insert(CostTotal {
-                        cost: bill.cost,
-                        cost_usd: bill.cost_usd,
-                        cost_unreserved: cost_unreserved,
-                        source: CostSource::Original,
-                    });
+                summary_data.accumulate(
+                    CostType::MeterCategory,
+                    bill.meter_category.clone(),
+                    bill.cost,
+                    bill.cost_usd,
+                    cost_unreserved,
+                );
 
-                summary_data
-                    .per_type
-                    .entry((CostType::Reservation, bill.benefit_name.clone()))
-                    .and_modify(|e| {
-                        e.cost += bill.cost;
-                        e.cost_usd += bill.cost_usd;
-                        e.cost_unreserved += cost_unreserved;
-                    })
-                    .or_insert(CostTotal {
-                        cost: bill.cost,
-                        cost_usd: bill.cost_usd,
-                        cost_unreserved: cost_unreserved,
-                        source: CostSource::Original,
-                    });
+                summary_data.accumulate(
+                    CostType::Reservation,
+                    bill.benefit_name.clone(),
+                    bill.cost,
+                    bill.cost_usd,
+                    cost_unreserved,
+                );
 
                 let region = if bill.resource_location.is_empty() { "none" } else { &bill.resource_location };
-                summary_data
-                    .per_type
-                    .entry((CostType::Region, region.to_string()))
-                    .and_modify(|e| {
-                        e.cost += bill.cost;
-                        e.cost_usd += bill.cost_usd;
-                        e.cost_unreserved += cost_unreserved;
-                    })
-                    .or_insert(CostTotal {
-                        cost: bill.cost,
-                        cost_usd: bill.cost_usd,
-                        cost_unreserved: cost_unreserved,
-                        source: CostSource::Original,
-                    });
+                summary_data.accumulate(
+                    CostType::Region,
+                    region.to_string(),
+                    bill.cost,
+                    bill.cost_usd,
+                    cost_unreserved,
+                );
 
                 let section = if !bill.invoice_section.is_empty() {
                     bill.invoice_section.clone()
@@ -220,79 +136,43 @@ impl Bills {
                 } else {
                     "none".to_string()
                 };
-                summary_data
-                    .per_type
-                    .entry((CostType::InvoiceSection, section.to_string()))
-                    .and_modify(|e| {
-                        e.cost += bill.cost;
-                        e.cost_usd += bill.cost_usd;
-                        e.cost_unreserved += cost_unreserved;
-                    })
-                    .or_insert(CostTotal {
-                        cost: bill.cost,
-                        cost_usd: bill.cost_usd,
-                        cost_unreserved: cost_unreserved,
-                        source: CostSource::Original,
-                    });
+                summary_data.accumulate(
+                    CostType::InvoiceSection,
+                    section,
+                    bill.cost,
+                    bill.cost_usd,
+                    cost_unreserved,
+                );
 
                 // add bill_details for tags, using the matched tag and value
-                if !tag_summarise.is_empty() {
-                    let tag_summarize_lowercase = if global_opts.case_sensitive {
-                        tag_summarise.to_string()
+                if !filter.tag_summarise.is_empty() {
+                    let tag_summarize_lowercase = if filter.case_sensitive {
+                        filter.tag_summarise.to_string()
                     } else {
-                        tag_summarise.to_lowercase()
+                        filter.tag_summarise.to_lowercase()
                     };
-                    if bill.tags.kv.contains_key(&tag_summarize_lowercase) {
-                        // from lowercase tag_summarise get the value and original key(Original case)
+                    let tag_key = if bill.tags.kv.contains_key(&tag_summarize_lowercase) {
                         let v = bill.tags.kv.get(&tag_summarize_lowercase).unwrap();
-                        summary_data
-                            .per_type
-                            .entry((CostType::Tag, format!("tag:{}={}", v.1, v.0)))
-                            .and_modify(|e| {
-                                e.cost += bill.cost;
-                        e.cost_usd += bill.cost_usd;
-                                e.cost_unreserved += cost_unreserved;
-                            })
-                            .or_insert(CostTotal {
-                                cost: bill.cost,
-                        cost_usd: bill.cost_usd,
-                                cost_unreserved: cost_unreserved,
-                                source: CostSource::Original,
-                            });
+                        format!("tag:{}={}", v.1, v.0)
                     } else {
-                        //no tag found
-                        summary_data
-                            .per_type
-                            .entry((CostType::Tag, "tag:none".to_string()))
-                            .and_modify(|e| {
-                                e.cost += bill.cost;
-                        e.cost_usd += bill.cost_usd;
-                                e.cost_unreserved += cost_unreserved;
-                            })
-                            .or_insert(CostTotal {
-                                cost: bill.cost,
-                        cost_usd: bill.cost_usd,
-                                cost_unreserved: cost_unreserved,
-                                source: CostSource::Original,
-                            });
-                    }
+                        "tag:none".to_string()
+                    };
+                    summary_data.accumulate(
+                        CostType::Tag,
+                        tag_key,
+                        bill.cost,
+                        bill.cost_usd,
+                        cost_unreserved,
+                    );
                 } // end tag_summarise
 
-                    summary_data
-                        .per_type
-                        .entry((CostType::MeterSubCategory, format!("{}__{}", bill.meter_category, bill.meter_sub_category)))
-                        .and_modify(|e| {
-                            e.cost += bill.cost;
-                        e.cost_usd += bill.cost_usd;
-                            e.cost_unreserved += cost_unreserved;
-                        })
-                        .or_insert(CostTotal {
-                            cost: bill.cost,
-                        cost_usd: bill.cost_usd,
-                            cost_unreserved: cost_unreserved,
-                            source: CostSource::Original,
-                        });
-
+                summary_data.accumulate(
+                    CostType::MeterSubCategory,
+                    format!("{}__{}", bill.meter_category, bill.meter_sub_category),
+                    bill.cost,
+                    bill.cost_usd,
+                    cost_unreserved,
+                );
                 // TODO: Add RESERVATION SUMMARY, struct added to Bills
                 // if RESERVATION_SUMMARY
                 //     .iter()
@@ -383,6 +263,7 @@ impl Bills {
 mod tests {
     use std::path::PathBuf;
 
+    use crate::bills::bill_filter::BillFilter;
     use crate::bills::bills_sum_data::{CostSource, CostTotal};
     use crate::bills::cost_type_enum::CostType;
     use crate::cmd_parse::GlobalOpts;
@@ -462,10 +343,9 @@ mod tests {
         let mut bills = crate::bills::Bills::default();
         bills.parse_csv(&path, global_opts).expect("parse failed");
 
-        let nf = "";
-        let summary = bills.cost_by_any_summary(
-            nf, nf, nf, nf, nf, nf, nf, nf, nf, global_opts,
-        );
+        let filter = BillFilter::new(None, None, None, None, None, None, None, None, None, GLOBAL_OPTS.case_sensitive)
+            .expect("valid test filter");
+        let summary = bills.cost_by_any_summary(&filter);
 
         // Both rows have MeterCategory=Compute → aggregate across both
         let mc_key = (CostType::MeterCategory, "Compute".to_string());
@@ -498,10 +378,9 @@ mod tests {
         let mut bills = crate::bills::Bills::default();
         bills.parse_csv(&path, global_opts).expect("parse failed");
 
-        let nf = "";
-        let summary = bills.cost_by_any_summary(
-            nf, "rg-delta-test", nf, nf, nf, nf, nf, nf, nf, global_opts,
-        );
+        let filter = BillFilter::new(None, Some("rg-delta-test".to_string()), None, None, None, None, None, None, None, GLOBAL_OPTS.case_sensitive)
+            .expect("valid test filter");
+        let summary = bills.cost_by_any_summary(&filter);
 
         // Matching RG present with full row cost
         let rg_key = (CostType::ResourceGroup, "rg-delta-test".to_string());
@@ -530,10 +409,9 @@ mod tests {
         let mut bills = crate::bills::Bills::default();
         bills.parse_csv(&path, global_opts).expect("parse failed");
 
-        let nf = "";
-        let summary = bills.cost_by_any_summary(
-            nf, nf, nf, nf, nf, nf, nf, nf, nf, global_opts,
-        );
+        let filter = BillFilter::new(None, None, None, None, None, None, None, None, None, GLOBAL_OPTS.case_sensitive)
+            .expect("valid test filter");
+        let summary = bills.cost_by_any_summary(&filter);
 
         let (rg_nzd_sum, rg_usd_sum) = summary
             .per_type
@@ -568,15 +446,10 @@ mod tests {
             .parse_csv(&prev_path, global_opts)
             .expect("prev CSV parse failed");
 
-        let no_filter = "";
-        let latest_summary = latest_bills.cost_by_any_summary(
-            no_filter, no_filter, no_filter, no_filter, no_filter, no_filter, no_filter,
-            no_filter, no_filter, global_opts,
-        );
-        let prev_summary = prev_bills.cost_by_any_summary(
-            no_filter, no_filter, no_filter, no_filter, no_filter, no_filter, no_filter,
-            no_filter, no_filter, global_opts,
-        );
+        let filter = BillFilter::new(None, None, None, None, None, None, None, None, None, GLOBAL_OPTS.case_sensitive)
+            .expect("valid test filter");
+        let latest_summary = latest_bills.cost_by_any_summary(&filter);
+        let prev_summary = prev_bills.cost_by_any_summary(&filter);
 
         // Simulate the merge/subtract from display.rs
         let mut merged = latest_summary.per_type;

@@ -2,9 +2,10 @@ use std::collections::HashSet;
 
 use colored::Colorize;
 
+use crate::bills::bill_filter::BillFilter;
 use crate::bills::Bills;
 // use super::bills_sum_data;
-use crate::bills::bills_sum_data::{CostSource, CostTotal, SummaryData};
+use crate::bills::bills_sum_data::{CostSource, SummaryData};
 use crate::bills::cost_type_enum::CostType;
 use crate::cmd_parse::GlobalOpts;
 use crate::f64_to_currency;
@@ -13,15 +14,7 @@ use crate::f64_to_currency;
 /// can also subtract previous_bill
 
 pub fn display_cost_by_filter(
-    name_r: Option<String>,
-    rg_r: Option<String>,
-    sub_r: Option<String>,
-    cat_r: Option<String>,
-    location_r: Option<String>,
-    reservation_r: Option<String>,
-    tag_summarise: Option<String>,
-    tag_filter: Option<String>,
-    invoice_section_r: Option<String>,
+    filter: &BillFilter,
     // file_or_folder: PathBuf,
     latest_bill: Bills,
     previous_bill: Option<Bills>,
@@ -30,34 +23,17 @@ pub fn display_cost_by_filter(
 ) {
     println!();
     println!(
-        "Filter Azure name_r:{name_r:?}, rg_r:{rg_r:?}, sub_r:{sub_r:?}, cat_r:{cat_r:?}, tag_r:{tag_filter:?}, tag_s:{tag_summarise:?}, location_r:{location_r:?}, reservation_r:{reservation_r:?}, invoice_section_r:{invoice_section_r:?}.\n"
+        "Filter Azure name:{}, rg:{}, sub:{}, cat:{}, tag_filter:{}, tag_summarise:{}, location:{}, reservation:{}, invoice_section:{}.\n",
+        filter.name, filter.resource_group, filter.subscription, filter.meter_category,
+        filter.tag_filter, filter.tag_summarise, filter.location, filter.reservation,
+        filter.invoice_section,
     );
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
     // and print the cost
     let cur = latest_bill.get_billing_currency();
-    let s_name = name_r.unwrap_or("".to_string());
-    let s_rg = rg_r.unwrap_or("".to_string());
-    let s_sub = sub_r.unwrap_or("".to_string());
-    let s_cat = cat_r.unwrap_or("".to_string());
-    let s_location = location_r.unwrap_or("any".to_string()); // allow for capture of empty location
-    let s_reservation = reservation_r.unwrap_or("".to_string());
-    let s_tag_s = tag_summarise.clone().unwrap_or("".to_string());
-    let s_tag_r = tag_filter.unwrap_or("".to_string());
-    let s_invoice_section = invoice_section_r.unwrap_or("".to_string());
     let mut display_date = latest_bill.file_short_name.clone();
 
-    let mut bill_summary = latest_bill.cost_by_any_summary(
-        &s_name,
-        &s_rg,
-        &s_sub,
-        &s_cat,
-        &s_location,
-        &s_reservation,
-        &s_tag_s,
-        &s_tag_r,
-        &s_invoice_section,
-        global_opts,
-    );
+    let mut bill_summary = latest_bill.cost_by_any_summary(filter);
     let mut total_cost = bill_summary.filtered_cost_total;
     let mut total_cost_usd = bill_summary.filtered_cost_total_usd;
     // If we got a previous bill calculate summary and subtract.
@@ -67,44 +43,13 @@ pub fn display_cost_by_filter(
             display_date = display_date,
             prev_date = prev_bill.file_short_name
         );
-        let prev_bill_summary = prev_bill.cost_by_any_summary(
-            &s_name,
-            &s_rg,
-            &s_sub,
-            &s_cat,
-            &s_location,
-            &s_reservation,
-            &s_tag_s,
-            &s_tag_r,
-            &s_invoice_section,
-            global_opts,
-        );
-        total_cost -= prev_bill_summary.filtered_cost_total;
-        total_cost_usd -= prev_bill_summary.filtered_cost_total_usd;
-        // merge negative values from prev_bill_details into bill_details Hashmap
-        // key (CostType, "resource_name")
-        for (prev_key, prev_cost_total) in &prev_bill_summary.per_type {
-            bill_summary
-                .per_type
-                .entry(prev_key.clone())
-                .and_modify(|cost_total| {
-                    cost_total.cost -= prev_cost_total.cost;
-                    cost_total.cost_usd -= prev_cost_total.cost_usd;
-                    cost_total.cost_unreserved -= prev_cost_total.cost_unreserved;
-                    cost_total.source = CostSource::Combined;
-                })
-                .or_insert(CostTotal {
-                    cost: -prev_cost_total.cost,
-                    cost_usd: -prev_cost_total.cost_usd,
-                    cost_unreserved: -prev_cost_total.cost_unreserved,
-                    source: CostSource::Secondary,
-                });
-        }
-        // merge negative values from prev_details into details HashSet
-        bill_summary.details.extend(prev_bill_summary.details);
+        let prev_bill_summary = prev_bill.cost_by_any_summary(filter);
+        bill_summary.merge_summaries(&prev_bill_summary);
+        total_cost = bill_summary.filtered_cost_total;
+        total_cost_usd = bill_summary.filtered_cost_total_usd;
     }
 
-    if !s_name.is_empty() {
+    if !filter.name.is_empty() {
         println!("## Name details: len={}", bill_summary.details.len());
         // https://vscode.dev/github/diepes/rust-azure-bill-analysis/blob/main/bill_analysis/src/bills/bills_impl_cost_by_any.rs#L322
         println!("## details: {{resource_group}}_____{{resource_name}}_____{{meter_category}}");
@@ -115,60 +60,60 @@ pub fn display_cost_by_filter(
     }
 
     // print Region bill details
-    println!("## Location bill details {} '{}'", s_location, display_date);
+    println!("## Location bill details {} '{}'", filter.location, display_date);
     print_summary(&bill_summary, &cur, CostType::Region, global_opts);
     println!();
 
     // print Invoice Section bill details (only when filter specified)
-    if !s_invoice_section.is_empty() {
-        println!("## Invoice Section bill details '{}' '{}'", s_invoice_section, display_date);
+    if !filter.invoice_section.is_empty() {
+        println!("## Invoice Section bill details '{}' '{}'", filter.invoice_section, display_date);
         print_summary(&bill_summary, &cur, CostType::InvoiceSection, global_opts);
         println!();
     }
 
     // print Subscription bill details
-    println!("## Subscription bill details {} '{}'", s_sub, display_date);
+    println!("## Subscription bill details {} '{}'", filter.subscription, display_date);
     print_summary(&bill_summary, &cur, CostType::Subscription, global_opts);
     println!();
     // print ResourceGroup bill details
-    println!("## ResourceGroup bill details {} '{}'", s_rg, display_date);
+    println!("## ResourceGroup bill details {} '{}'", filter.resource_group, display_date);
     print_summary(&bill_summary, &cur, CostType::ResourceGroup, global_opts);
     println!();
     // print Resource bill details
-    if !s_name.is_empty() {
-        println!("## ResourceName bill details {} '{}'", s_rg, display_date);
+    if !filter.name.is_empty() {
+        println!("## ResourceName bill details {} '{}'", filter.resource_group, display_date);
         print_summary(&bill_summary, &cur, CostType::ResourceName, global_opts);
     }
 
     // print MeterSubCategory bill details
-    if !s_cat.is_empty() {
+    if !filter.meter_category.is_empty() {
         println!(
             "## MeterSubCategory bill details {} '{}'",
-            s_rg, display_date
+            filter.resource_group, display_date
         );
         print_summary(&bill_summary, &cur, CostType::MeterSubCategory, global_opts);
         println!()
     }
     // print MeterCategory bill details
-    if !s_cat.is_empty() {
-        println!("## MeterCategory bill details {} '{}'", s_rg, display_date);
+    if !filter.meter_category.is_empty() {
+        println!("## MeterCategory bill details {} '{}'", filter.resource_group, display_date);
         print_summary(&bill_summary, &cur, CostType::MeterCategory, global_opts);
         println!()
     }
 
     // print Tag bill details
-    if !s_tag_s.is_empty() {
-        println!("## Tag details {} '{}'", s_tag_s, display_date);
+    if !filter.tag_summarise.is_empty() {
+        println!("## Tag details {} '{}'", filter.tag_summarise, display_date);
         print_summary(&bill_summary, &cur, CostType::Tag, global_opts);
         println!();
     }
 
     println!(
-        "Total cost excl. GST {total_cost}  ({total_cost_usd})  date:'{display_date}' Region:'{s_location}'",
+        "Total cost excl. GST {total_cost}  ({total_cost_usd})  date:'{display_date}' Region:'{location}'",
         total_cost = format!("{total_cost}").bold(),
         total_cost_usd = format!("{total_cost_usd}").bold(),
         display_date = display_date,
-        s_location = s_location,
+        location = filter.location,
     );
 
     if global_opts.tag_list {
@@ -181,7 +126,7 @@ pub fn display_cost_by_filter(
     }
 
     // print Reservation bill details
-    if !s_reservation.is_empty() {
+    if !filter.reservation.is_empty() {
         print_summary(&bill_summary, &cur, CostType::Reservation, global_opts);
         println!();
 

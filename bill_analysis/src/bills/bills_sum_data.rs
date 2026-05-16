@@ -40,6 +40,61 @@ pub struct SummaryData<'a> {
     pub filtered_cost_total_usd: Usd,
     pub reservations: std::collections::HashMap<(String, u8), ReservationInfo<'a>>, // flex type, day of month
 }
+impl<'a> SummaryData<'a> {
+    /// Accumulate a single bill row's cost into `per_type` under the given key.
+    /// On first insertion the source is `Original`; on subsequent rows the costs are summed.
+    pub fn accumulate(
+        &mut self,
+        cost_type: CostType,
+        key: String,
+        cost: crate::money::Nzd,
+        cost_usd: crate::money::Usd,
+        cost_unreserved: f64,
+    ) {
+        self.per_type
+            .entry((cost_type, key))
+            .and_modify(|e| {
+                e.cost += cost;
+                e.cost_usd += cost_usd;
+                e.cost_unreserved += cost_unreserved;
+            })
+            .or_insert(CostTotal {
+                cost,
+                cost_usd,
+                cost_unreserved,
+                source: CostSource::Original,
+            });
+    }
+
+    /// Subtract `prev` from `self` in place, producing a diff view.
+    ///
+    /// Entries present in both → `Combined` with delta costs.
+    /// Entries only in `prev`  → `Secondary` with negated costs (gone/removed).
+    /// Entries only in `self`  → unchanged `Original` (new/added).
+    /// Also subtracts the filtered cost totals and merges details sets.
+    pub fn merge_summaries(&mut self, prev: &SummaryData) {
+        self.filtered_cost_total -= prev.filtered_cost_total;
+        self.filtered_cost_total_usd -= prev.filtered_cost_total_usd;
+        for (prev_key, prev_cost) in &prev.per_type {
+            self.per_type
+                .entry(prev_key.clone())
+                .and_modify(|e| {
+                    e.cost -= prev_cost.cost;
+                    e.cost_usd -= prev_cost.cost_usd;
+                    e.cost_unreserved -= prev_cost.cost_unreserved;
+                    e.source = CostSource::Combined;
+                })
+                .or_insert(CostTotal {
+                    cost: -prev_cost.cost,
+                    cost_usd: -prev_cost.cost_usd,
+                    cost_unreserved: -prev_cost.cost_unreserved,
+                    source: CostSource::Secondary,
+                });
+        }
+        self.details.extend(prev.details.iter().cloned());
+    }
+}
+
 impl<'a> Default for SummaryData<'a> {
     fn default() -> SummaryData<'a> {
         SummaryData {

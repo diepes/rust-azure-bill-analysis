@@ -83,7 +83,7 @@ fn main() {
             };
             // Display latest_bill ( - previous bill if set)
             // using regex filters if set
-            bill_analysis::bills::display::display_cost_by_filter(
+            let filter = bill_analysis::bills::BillFilter::new(
                 app.name_regex,
                 app.resource_group,
                 app.subscription,
@@ -93,6 +93,14 @@ fn main() {
                 app.tag_summarise,
                 app.tag_filter,
                 app.invoice_section,
+                app.global_opts.case_sensitive,
+            )
+            .unwrap_or_else(|e| {
+                eprintln!("Error: invalid regex in filter: {e}");
+                std::process::exit(1);
+            });
+            bill_analysis::bills::display::display_cost_by_filter(
+                &filter,
                 latest_bill,
                 previous_bill,
                 &app.global_opts,
