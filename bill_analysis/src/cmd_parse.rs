@@ -13,6 +13,14 @@ pub struct App {
     // Commands to run
     #[command(subcommand)]
     pub command: Option<Commands>,
+    /// Latest bill — shorthand date ("04", "2025-10", "202510") or full path.
+    /// Alternative to --bill-path; takes precedence if both are given.
+    #[arg(index = 1)]
+    pub bill: Option<PathBuf>,
+    /// Previous bill to subtract — same shorthand formats as `bill`.
+    /// Alternative to --bill-prev-subtract-path; takes precedence if both are given.
+    #[arg(index = 2)]
+    pub bill_prev: Option<PathBuf>,
     /// regex find to filter on invoice section name
     #[arg(long)]
     pub invoice_section: Option<String>,

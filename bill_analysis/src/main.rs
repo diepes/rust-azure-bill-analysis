@@ -46,12 +46,15 @@ fn main() {
                 println!("No command specified #1 {:?}", app);
                 println!("No command specified #2 {:?}", app.name_regex);
             }
-            let bill_path = app.global_opts.bill_path.clone()
+            // Positional args take precedence over named flags
+            let bill_path = app.bill
+                .or(app.global_opts.bill_path)
                 .unwrap_or_else(|| {
                     let default = bill_analysis::find_files::last_month_shorthand();
-                    println!("No --bill-path specified, defaulting to last month: {default}");
+                    println!("No bill specified, defaulting to last month: {default}");
                     std::path::PathBuf::from(default)
                 });
+            let prev_path = app.bill_prev.or(app.global_opts.bill_prev_subtract_path);
             let (latest_bill, file_name) = bill_analysis::load_bill(&bill_path, &filter_opts, debug);
             println!("Loaded latest bill from '{:?}'", file_name);
             bill_analysis::display_total_cost_summary(
@@ -60,7 +63,7 @@ fn main() {
             );
             // If set read previous bill and subtract it from latest bill
             let previous_bill: Option<bills::Bills> = if let Some(ref bill_prev_subtract_path) =
-                app.global_opts.bill_prev_subtract_path
+                prev_path
             {
                 let (prev_bill, prev_file_name) =
                     bill_analysis::load_bill(bill_prev_subtract_path, &filter_opts, debug);

@@ -15,17 +15,34 @@ pub fn last_month_shorthand() -> String {
     format!("{:04}-{:02}", year, month)
 }
 
-/// If `path` starts with a date shorthand (`YYYY-MM` or `YYYYMM`), resolve it to a
-/// real file or directory under `csv_data/`. Resolution order for each format variant:
-///   1. `csv_data/{date}*/`  — a subdirectory whose name starts with the date
-///   2. `csv_data/{date}*.csv` — a CSV file whose name starts with the date
-/// Both `YYYY-MM` and `YYYYMM` variants are tried (YYYY-MM first).
+/// If `path` starts with a date shorthand (`YYYY-MM`, `YYYYMM`, or bare `MM`), resolve it
+/// to a real file or directory under `csv_data/`. Resolution order:
+///
+/// - `MM` (2 digits): tries `{current_year}-{MM}`, then `{prev_year}-{MM}`, each using the
+///   same sub-dir / CSV search as the full-date variants below.
+/// - `YYYY-MM` / `YYYYMM`: tries subdirectory then CSV file for each format variant.
+///
 /// If no match is found, the original path is returned unchanged.
 pub fn resolve_date_shorthand(path: &Path) -> PathBuf {
     let path_str = match path.to_str() {
         Some(s) => s,
         None => return path.to_path_buf(),
     };
+
+    // Bare MM (exactly 2 digits, e.g. "04" or "10")
+    let re_mm = Regex::new(r"^\d{2}$").unwrap();
+    if re_mm.is_match(path_str) {
+        use chrono::{Datelike, Local};
+        let today = Local::now();
+        let cur_year = today.year();
+        for year in &[cur_year, cur_year - 1] {
+            let candidate = format!("{:04}-{}", year, path_str);
+            if let Some(p) = resolve_yyyymm_candidate(&candidate) {
+                return p;
+            }
+        }
+        return path.to_path_buf();
+    }
 
     // Match exactly YYYY-MM or YYYYMM at the start of the value
     let re = Regex::new(r"^\d{4}(-\d{2}|\d{2})(?:[^0-9]|$)").unwrap();
@@ -38,8 +55,17 @@ pub fn resolve_date_shorthand(path: &Path) -> PathBuf {
     } else {
         &path_str[..6] // YYYYMM
     };
+    if let Some(p) = resolve_yyyymm_candidate(token) {
+        return p;
+    }
 
-    // Derive both format variants
+    // Nothing found — return as-is so the caller surfaces a natural error
+    path.to_path_buf()
+}
+
+/// Try to find a csv_data entry for a `YYYY-MM` or `YYYYMM` token.
+/// Tries both dash and compact forms; subdirectory first, then CSV file.
+fn resolve_yyyymm_candidate(token: &str) -> Option<PathBuf> {
     let (dash, compact) = if token.contains('-') {
         (token.to_string(), token.replace('-', ""))
     } else {
@@ -52,18 +78,14 @@ pub fn resolve_date_shorthand(path: &Path) -> PathBuf {
     let base = Path::new("csv_data");
 
     for date in &[&dash, &compact] {
-        // 1. Subdirectory: csv_data/{date}*/
         if let Some(p) = find_entry_with_prefix(base, date, true) {
-            return p;
+            return Some(p);
         }
-        // 2. CSV file: csv_data/{date}*.csv
         if let Some(p) = find_entry_with_prefix(base, date, false) {
-            return p;
+            return Some(p);
         }
     }
-
-    // Nothing found — return as-is so the caller surfaces a natural error
-    path.to_path_buf()
+    None
 }
 
 /// Scan `base` for an entry whose name starts with `prefix`.
@@ -207,6 +229,20 @@ mod tests {
     fn test_resolve_date_shorthand_detects_yyyymm() {
         // A YYYYMM value that doesn't exist in csv_data/ returns original path
         let p = PathBuf::from("202510");
+        assert_eq!(resolve_date_shorthand(&p), p);
+    }
+
+    #[test]
+    fn test_resolve_date_shorthand_mm_too_short_passthrough() {
+        // 1 digit — not MM, returned unchanged
+        let p = PathBuf::from("4");
+        assert_eq!(resolve_date_shorthand(&p), p);
+    }
+
+    #[test]
+    fn test_resolve_date_shorthand_mm_no_match_returns_original() {
+        // "99" is a valid MM shape but no csv_data/ entry will match
+        let p = PathBuf::from("99");
         assert_eq!(resolve_date_shorthand(&p), p);
     }
 }

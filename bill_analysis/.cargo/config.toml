@@ -1,0 +1,12 @@
+# Workaround for Microsoft Defender stripping execute bit on newly built binaries.
+# The runner re-adds the execute bit before launching (used by `cargo run`).
+# Use the `xrun` alias below as a drop-in for `cargo run --release -- <args>`.
+
+[target.aarch64-apple-darwin]
+runner = ["sh", "-c", "chmod +x \"$0\" && exec \"$0\" \"$@\""]
+
+[alias]
+# Build release and restore execute bit in one step.
+# 202605 workaround Microsoft defender - excluded dir did not work
+# Usage: cargo xbuild
+xbuild = "!cargo build --release && chmod +x target/release/bill_analysis"
