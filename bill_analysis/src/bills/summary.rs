@@ -1,5 +1,5 @@
 use crate::bills::Bills;
-use crate::cmd_parse::GlobalOpts;
+use crate::cmd_parse::FilterOpts;
 use crate::find_files;
 use crate::money::{Nzd, Usd};
 use std::collections::HashMap;
@@ -17,12 +17,10 @@ pub struct Summary {
 }
 
 impl Bills {
-    pub fn summary(&mut self, folder: &Path, global_opts: &GlobalOpts) {
+    pub fn summary(&mut self, folder: &Path, filter_opts: &FilterOpts, debug: bool) {
         println!("Hello, world!! Calculating Azure savings form Amortized charges csv export.\n");
-        //let folder = app.global_opts.billpath.unwrap();
-        //TODO: file re_pattern should be commandline override arg.
         let (path, files) =
-            find_files::in_folder(folder, r"Detail_Enrollment_70785102_.*_en.csv", global_opts);
+            find_files::in_folder(folder, r"Detail_Enrollment_70785102_.*_en.csv", debug);
         println!("Found {:?} csv files.", files.len());
         // Collect file paths first to avoid borrowing self across loop iterations
         let file_paths: Vec<_> = files
@@ -30,7 +28,7 @@ impl Bills {
             .map(|csv_file_name| path.join(csv_file_name))
             .collect();
         for file_path in file_paths {
-            self.parse_csv(&file_path, global_opts)
+            self.parse_csv(&file_path, filter_opts)
                 .expect(&format!("Error parsing the file '{:?}'", file_path));
             println!();
             println!(

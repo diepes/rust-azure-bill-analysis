@@ -7,7 +7,7 @@ use crate::bills::Bills;
 // use super::bills_sum_data;
 use crate::bills::bills_sum_data::{CostSource, SummaryData};
 use crate::bills::cost_type_enum::CostType;
-use crate::cmd_parse::GlobalOpts;
+use crate::cmd_parse::DisplayOpts;
 use crate::f64_to_currency;
 
 /// Display cost summary.
@@ -18,8 +18,7 @@ pub fn display_cost_by_filter(
     // file_or_folder: PathBuf,
     latest_bill: Bills,
     previous_bill: Option<Bills>,
-    // global_opts.case_sensitive: bool,
-    global_opts: &GlobalOpts,
+    display_opts: &DisplayOpts,
 ) {
     println!();
     println!(
@@ -33,6 +32,7 @@ pub fn display_cost_by_filter(
     let cur = latest_bill.get_billing_currency();
     let mut display_date = latest_bill.file_short_name.clone();
 
+    let is_comparison = previous_bill.is_some();
     let mut bill_summary = latest_bill.cost_by_any_summary(filter);
     let mut total_cost = bill_summary.filtered_cost_total;
     let mut total_cost_usd = bill_summary.filtered_cost_total_usd;
@@ -61,28 +61,28 @@ pub fn display_cost_by_filter(
 
     // print Region bill details
     println!("## Location bill details {} '{}'", filter.location, display_date);
-    print_summary(&bill_summary, &cur, CostType::Region, global_opts);
+    print_summary(&bill_summary, &cur, CostType::Region, display_opts, is_comparison);
     println!();
 
     // print Invoice Section bill details (only when filter specified)
     if !filter.invoice_section.is_empty() {
         println!("## Invoice Section bill details '{}' '{}'", filter.invoice_section, display_date);
-        print_summary(&bill_summary, &cur, CostType::InvoiceSection, global_opts);
+        print_summary(&bill_summary, &cur, CostType::InvoiceSection, display_opts, is_comparison);
         println!();
     }
 
     // print Subscription bill details
     println!("## Subscription bill details {} '{}'", filter.subscription, display_date);
-    print_summary(&bill_summary, &cur, CostType::Subscription, global_opts);
+    print_summary(&bill_summary, &cur, CostType::Subscription, display_opts, is_comparison);
     println!();
     // print ResourceGroup bill details
     println!("## ResourceGroup bill details {} '{}'", filter.resource_group, display_date);
-    print_summary(&bill_summary, &cur, CostType::ResourceGroup, global_opts);
+    print_summary(&bill_summary, &cur, CostType::ResourceGroup, display_opts, is_comparison);
     println!();
     // print Resource bill details
     if !filter.name.is_empty() {
         println!("## ResourceName bill details {} '{}'", filter.resource_group, display_date);
-        print_summary(&bill_summary, &cur, CostType::ResourceName, global_opts);
+        print_summary(&bill_summary, &cur, CostType::ResourceName, display_opts, is_comparison);
     }
 
     // print MeterSubCategory bill details
@@ -91,20 +91,20 @@ pub fn display_cost_by_filter(
             "## MeterSubCategory bill details {} '{}'",
             filter.resource_group, display_date
         );
-        print_summary(&bill_summary, &cur, CostType::MeterSubCategory, global_opts);
+        print_summary(&bill_summary, &cur, CostType::MeterSubCategory, display_opts, is_comparison);
         println!()
     }
     // print MeterCategory bill details
     if !filter.meter_category.is_empty() {
         println!("## MeterCategory bill details {} '{}'", filter.resource_group, display_date);
-        print_summary(&bill_summary, &cur, CostType::MeterCategory, global_opts);
+        print_summary(&bill_summary, &cur, CostType::MeterCategory, display_opts, is_comparison);
         println!()
     }
 
     // print Tag bill details
     if !filter.tag_summarise.is_empty() {
         println!("## Tag details {} '{}'", filter.tag_summarise, display_date);
-        print_summary(&bill_summary, &cur, CostType::Tag, global_opts);
+        print_summary(&bill_summary, &cur, CostType::Tag, display_opts, is_comparison);
         println!();
     }
 
@@ -116,7 +116,7 @@ pub fn display_cost_by_filter(
         location = filter.location,
     );
 
-    if global_opts.tag_list {
+    if display_opts.tag_list {
         println!();
         println!(
             "Tags: {}\n{:?}",
@@ -127,7 +127,7 @@ pub fn display_cost_by_filter(
 
     // print Reservation bill details
     if !filter.reservation.is_empty() {
-        print_summary(&bill_summary, &cur, CostType::Reservation, global_opts);
+        print_summary(&bill_summary, &cur, CostType::Reservation, display_opts, is_comparison);
         println!();
 
         println!();
@@ -250,13 +250,14 @@ fn print_summary(
     bill_summary: &SummaryData,
     cur: &str,
     cost_type: CostType,
-    global_opts: &GlobalOpts,
+    display_opts: &DisplayOpts,
+    is_comparison: bool,
 ) {
     let (total, total_usd, cnt, bill_details_sorted) =
         sort_calc_total(bill_summary, &cost_type);
     let mut cnt_skip = 0;
 
-    let color_legend = if global_opts.bill_prev_subtract_path.is_none() {
+    let color_legend = if !is_comparison {
         format!("Legend: {cyan}", cyan = "Cyan=Credit/Refund(negative)".cyan())
     } else {
         format!(
@@ -284,7 +285,7 @@ fn print_summary(
                 if *cost < 0.0 { part1.green().to_string() } else { part1.blue().to_string() }
             }
         };
-        if *cost > global_opts.cost_min_display || *cost < -global_opts.cost_min_display {
+        if *cost > display_opts.cost_min_display || *cost < -display_opts.cost_min_display {
             println!(
                 " bill_details: '{color_cost}' :: {t_short}:'{name}'",
                 t_short = cost_type.as_short(),
@@ -297,7 +298,7 @@ fn print_summary(
         println!(
             " bill_details: skipped {cnt_skip} with cost below < '{cur} {cost_min_display:.2}' Type::{t_short}",
             t_short = cost_type.as_short(),
-            cost_min_display = global_opts.cost_min_display,
+            cost_min_display = display_opts.cost_min_display,
         );
     }
     if cnt > 0 {

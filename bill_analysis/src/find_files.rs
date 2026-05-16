@@ -2,8 +2,6 @@ use regex::Regex; // Add this line to import the `Regex` struct from the `regex`
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::cmd_parse::GlobalOpts;
-
 /// Returns the previous calendar month as a `YYYY-MM` shorthand string,
 /// e.g. if today is 2026-05-15, returns `"2026-04"`.
 pub fn last_month_shorthand() -> String {
@@ -94,7 +92,7 @@ fn find_entry_with_prefix(base: &Path, prefix: &str, dir_only: bool) -> Option<P
 pub fn in_folder(
     path: &Path,
     file_re_pattern: &str,
-    global_opts: &GlobalOpts,
+    debug: bool,
 ) -> (PathBuf, Vec<String>) {
     let mut files = Vec::new();
     // extract the folder or set to ./(current folder)
@@ -126,7 +124,7 @@ pub fn in_folder(
             if re.is_match(file_name) {
                 files.push(file_name.to_string());
             }
-            if global_opts.debug {
+            if debug {
                 println!("Debug path: {:?} {}", folder, file_name);
             };
         }
@@ -139,21 +137,13 @@ pub fn in_folder(
 #[cfg(test)]
 mod tests {
     use super::*;
-    static GLOBAL_OPTS: GlobalOpts = GlobalOpts {
-        debug: false,
-        bill_path: None,
-        bill_prev_subtract_path: None,
-        cost_min_display: 0.0,
-        case_sensitive: true,
-        tag_list: false,
-    };
 
     #[test]
     fn test_find_files_dir() {
         let (path, files) = in_folder(
             &PathBuf::from("tests"),
             r"azure_test_.*_01.csv",
-            &GLOBAL_OPTS,
+            false,
         );
         assert_eq!(path.to_str().unwrap(), "tests");
         assert_eq!(files.len(), 2);
@@ -165,7 +155,7 @@ mod tests {
         let (path, files) = in_folder(
             &PathBuf::from("./tests/azure_test_disks_02.txt"),
             r"azure_test_.*_01.csv",
-            &GLOBAL_OPTS,
+            false,
         );
         assert_eq!(path.to_str().unwrap(), "./tests");
         assert_eq!(files.len(), 1);
@@ -176,7 +166,7 @@ mod tests {
         let (path, files) = in_folder(
             &PathBuf::from("./tests/disks_02"),
             r"azure_test_.*_01.csv",
-            &GLOBAL_OPTS,
+            false,
         );
         assert_eq!(path.to_str().unwrap(), "./tests");
         assert_eq!(files.len(), 1);

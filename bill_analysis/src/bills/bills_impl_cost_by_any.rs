@@ -266,26 +266,18 @@ mod tests {
     use crate::bills::bill_filter::BillFilter;
     use crate::bills::bills_sum_data::{CostSource, CostTotal};
     use crate::bills::cost_type_enum::CostType;
-    use crate::cmd_parse::GlobalOpts;
+    use crate::cmd_parse::FilterOpts;
     use crate::money::{Nzd, Usd};
 
     // use super::*;
 
-    static GLOBAL_OPTS: GlobalOpts = crate::GlobalOpts {
-        debug: false,
-        bill_path: None,
-        bill_prev_subtract_path: None,
-        cost_min_display: 10.0,
-        case_sensitive: true,
-        tag_list: false,
-    };
+    static FILTER_OPTS: FilterOpts = FilterOpts { case_sensitive: true };
 
     #[test]
     fn test_cost_by_resource_name() {
-        let global_opts = &GLOBAL_OPTS;
         let file_name: PathBuf = PathBuf::from("tests/azure_test_data_01.csv");
         let mut bills = crate::bills::Bills::default();
-        let result = bills.parse_csv(&file_name, global_opts);
+        let result = bills.parse_csv(&file_name, &FILTER_OPTS);
         assert!(
             result.is_ok(),
             "!Error parsing the file:'{file_name:?}'\nERR:{}",
@@ -296,10 +288,9 @@ mod tests {
     }
     #[test]
     fn test_parse_csv() {
-        let global_opts = &GLOBAL_OPTS;
         let file_name: PathBuf = PathBuf::from("tests/azure_test_data_01.csv");
         let mut bills = crate::bills::Bills::default();
-        let result = bills.parse_csv(&file_name, global_opts);
+        let result = bills.parse_csv(&file_name, &FILTER_OPTS);
         assert!(
             result.is_ok(),
             "!Error parsing the file:'{file_name:?}'\nERR:{}",
@@ -338,12 +329,11 @@ mod tests {
     /// Uses the two-row NZD/USD fixture (latest) so expected values are known exactly.
     #[test]
     fn test_cost_by_any_summary_per_type_nzd_usd() {
-        let global_opts = &GLOBAL_OPTS;
         let path = PathBuf::from("tests/azure_test_nzd_usd_latest.csv");
         let mut bills = crate::bills::Bills::default();
-        bills.parse_csv(&path, global_opts).expect("parse failed");
+        bills.parse_csv(&path, &FILTER_OPTS).expect("parse failed");
 
-        let filter = BillFilter::new(None, None, None, None, None, None, None, None, None, GLOBAL_OPTS.case_sensitive)
+        let filter = BillFilter::new(None, None, None, None, None, None, None, None, None, &FILTER_OPTS)
             .expect("valid test filter");
         let summary = bills.cost_by_any_summary(&filter);
 
@@ -373,12 +363,11 @@ mod tests {
     /// Both `per_type` and `filtered_cost_total` must reflect the filtered subset only.
     #[test]
     fn test_cost_by_any_summary_rg_filter() {
-        let global_opts = &GLOBAL_OPTS;
         let path = PathBuf::from("tests/azure_test_nzd_usd_latest.csv");
         let mut bills = crate::bills::Bills::default();
-        bills.parse_csv(&path, global_opts).expect("parse failed");
+        bills.parse_csv(&path, &FILTER_OPTS).expect("parse failed");
 
-        let filter = BillFilter::new(None, Some("rg-delta-test".to_string()), None, None, None, None, None, None, None, GLOBAL_OPTS.case_sensitive)
+        let filter = BillFilter::new(None, Some("rg-delta-test".to_string()), None, None, None, None, None, None, None, &FILTER_OPTS)
             .expect("valid test filter");
         let summary = bills.cost_by_any_summary(&filter);
 
@@ -404,12 +393,11 @@ mod tests {
     /// `filtered_cost_total` and `filtered_cost_total_usd`.
     #[test]
     fn test_filtered_totals_equal_per_type_rg_sum() {
-        let global_opts = &GLOBAL_OPTS;
         let path = PathBuf::from("tests/azure_test_nzd_usd_latest.csv");
         let mut bills = crate::bills::Bills::default();
-        bills.parse_csv(&path, global_opts).expect("parse failed");
+        bills.parse_csv(&path, &FILTER_OPTS).expect("parse failed");
 
-        let filter = BillFilter::new(None, None, None, None, None, None, None, None, None, GLOBAL_OPTS.case_sensitive)
+        let filter = BillFilter::new(None, None, None, None, None, None, None, None, None, &FILTER_OPTS)
             .expect("valid test filter");
         let summary = bills.cost_by_any_summary(&filter);
 
@@ -432,21 +420,20 @@ mod tests {
     ///   Secondary — only in previous      → negated previous cost
     #[test]
     fn test_compare_bills_nzd_usd_deltas() {
-        let global_opts = &GLOBAL_OPTS;
         let latest_path = PathBuf::from("tests/azure_test_nzd_usd_latest.csv");
         let prev_path = PathBuf::from("tests/azure_test_nzd_usd_prev.csv");
 
         let mut latest_bills = crate::bills::Bills::default();
         latest_bills
-            .parse_csv(&latest_path, global_opts)
+            .parse_csv(&latest_path, &FILTER_OPTS)
             .expect("latest CSV parse failed");
 
         let mut prev_bills = crate::bills::Bills::default();
         prev_bills
-            .parse_csv(&prev_path, global_opts)
+            .parse_csv(&prev_path, &FILTER_OPTS)
             .expect("prev CSV parse failed");
 
-        let filter = BillFilter::new(None, None, None, None, None, None, None, None, None, GLOBAL_OPTS.case_sensitive)
+        let filter = BillFilter::new(None, None, None, None, None, None, None, None, None, &FILTER_OPTS)
             .expect("valid test filter");
         let latest_summary = latest_bills.cost_by_any_summary(&filter);
         let prev_summary = prev_bills.cost_by_any_summary(&filter);

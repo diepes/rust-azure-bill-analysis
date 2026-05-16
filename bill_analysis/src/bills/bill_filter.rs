@@ -1,3 +1,4 @@
+use crate::cmd_parse::FilterOpts;
 use regex::{Regex, RegexBuilder};
 
 /// `BillFilter` groups all per-query filter parameters that narrow down which
@@ -42,8 +43,9 @@ impl BillFilter {
     /// CLI args. `None` maps to `""` for all fields except `location`, which
     /// maps to `"any"` (the "match all regions" sentinel).
     ///
-    /// `case_sensitive` mirrors `GlobalOpts::case_sensitive`; pass it here so
-    /// the regexes are compiled with the right flag once and reused.
+    /// `filter_opts.case_sensitive` controls whether regexes are compiled
+    /// case-sensitively; the value is also stored on the struct for later use
+    /// (e.g. tag key lookup).
     ///
     /// Returns `Err` if any pattern is not a valid regex expression.
     pub fn new(
@@ -56,7 +58,7 @@ impl BillFilter {
         tag_summarise: Option<String>,
         tag_filter: Option<String>,
         invoice_section: Option<String>,
-        case_sensitive: bool,
+        filter_opts: &FilterOpts,
     ) -> Result<Self, regex::Error> {
         let name = name.unwrap_or_default();
         let resource_group = resource_group.unwrap_or_default();
@@ -68,7 +70,7 @@ impl BillFilter {
         let tag_filter = tag_filter.unwrap_or_default();
         let invoice_section = invoice_section.unwrap_or_default();
 
-        let ci = !case_sensitive;
+        let ci = !filter_opts.case_sensitive;
 
         let build_re_with_case = |pattern: &str| RegexBuilder::new(pattern).case_insensitive(ci).build();
 
@@ -81,7 +83,7 @@ impl BillFilter {
             re_reservation: build_re_with_case(&reservation)?,
             re_tag_filter: build_re_with_case(&tag_filter)?,
             re_invoice_section: build_re_with_case(&invoice_section)?,
-            case_sensitive,
+            case_sensitive: filter_opts.case_sensitive,
             name,
             resource_group,
             subscription,

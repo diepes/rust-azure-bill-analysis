@@ -62,6 +62,24 @@ pub struct DiskCsvSavingsArgs {
     #[arg(short, long, default_value = "../Azuredisks-Unattached-20240517.csv")]
     pub diskfile: PathBuf,
 }
+/// Options that control bill parsing and regex matching.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FilterOpts {
+    /// Whether name / tag matching is case-sensitive.
+    pub case_sensitive: bool,
+}
+
+/// Options that control what is shown and how.
+#[derive(Debug, Clone, Copy)]
+pub struct DisplayOpts {
+    /// Rows with absolute cost below this threshold are suppressed.
+    pub cost_min_display: f64,
+    /// Print all unique tag names found in the bill.
+    pub tag_list: bool,
+    /// Print debug diagnostics.
+    pub debug: bool,
+}
+
 #[derive(Debug, Args)]
 pub struct GlobalOpts {
     /// Activate debug mode

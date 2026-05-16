@@ -164,25 +164,17 @@ impl Hash for BillEntry {
 
 #[cfg(test)]
 mod tests {
-    use crate::cmd_parse::GlobalOpts;
+    use crate::cmd_parse::FilterOpts;
     use crate::money::Nzd;
     use std::path::PathBuf;
 
-    static GLOBAL_OPTS: GlobalOpts = crate::GlobalOpts {
-        debug: false,
-        bill_path: None,
-        bill_prev_subtract_path: None,
-        cost_min_display: 10.0,
-        case_sensitive: true,
-        tag_list: false,
-    };
+    static FILTER_OPTS: FilterOpts = FilterOpts { case_sensitive: true };
 
     #[test]
     fn test_cost_by_resource_name() {
-        let global_opts = &GLOBAL_OPTS;
         let file_name: PathBuf = PathBuf::from("tests/azure_test_data_01.csv");
         let mut bills = crate::bills::Bills::default();
-        let result = bills.parse_csv(&file_name, global_opts);
+        let result = bills.parse_csv(&file_name, &FILTER_OPTS);
         assert!(
             result.is_ok(),
             "!Error parsing the file:'{file_name:?}'\nERR:{}",
@@ -193,10 +185,9 @@ mod tests {
     }
     #[test]
     fn test_parse_csv() {
-        let global_opts = &GLOBAL_OPTS;
         let file_name: PathBuf = PathBuf::from("tests/azure_test_data_01.csv");
         let mut bills = crate::bills::Bills::default();
-        let result = bills.parse_csv(&file_name, global_opts);
+        let result = bills.parse_csv(&file_name, &FILTER_OPTS);
         assert!(
             result.is_ok(),
             "!Error parsing the file:'{file_name:?}'\nERR:{}",

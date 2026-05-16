@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use cmd_parse::GlobalOpts;
+use cmd_parse::FilterOpts;
 
 // use once_cell::sync::Lazy;
 // static RESERVATION_SUMMARY: Lazy<HashMap<&'static str, Vec<&'static str>>> = Lazy::new(|| {
@@ -23,9 +23,9 @@ use cmd_parse::GlobalOpts;
 // });
 
 // function calc_subscription_cost
-pub fn calc_subscription_cost(subscription: &str, file_or_folder: &Path, global_opts: &GlobalOpts) {
+pub fn calc_subscription_cost(subscription: &str, file_or_folder: &Path, filter_opts: &FilterOpts, debug: bool) {
     println!("Calculating Azure subscription:\"{subscription}\" cost from csv export.\n");
-    let (latest_bill, bill_file_name) = load_latest_bill(file_or_folder, global_opts);
+    let (latest_bill, bill_file_name) = load_latest_bill(file_or_folder, filter_opts, debug);
     println!();
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
     // and print the cost
@@ -37,7 +37,7 @@ pub fn calc_subscription_cost(subscription: &str, file_or_folder: &Path, global_
     println!("Total cost {total_cost} subs:{:?}", subs);
 }
 
-fn load_latest_bill(file_or_folder: &Path, global_opts: &GlobalOpts) -> (Bills, String) {
+fn load_latest_bill(file_or_folder: &Path, filter_opts: &FilterOpts, debug: bool) -> (Bills, String) {
     let resolved = find_files::resolve_date_shorthand(file_or_folder);
     let file_or_folder = resolved.as_path();
     let file_bill: PathBuf = if file_or_folder.is_file() {
@@ -46,14 +46,14 @@ fn load_latest_bill(file_or_folder: &Path, global_opts: &GlobalOpts) -> (Bills, 
         let (path, files) = find_files::in_folder(
             file_or_folder,
             r".*Detail.*\.csv$",
-            global_opts,
+            debug,
         );
         path.join(files.last().expect("No files found"))
     };
     println!("Loading bill from '{:?}'", file_bill);
     let mut latest_bill: Bills = Bills::default();
     latest_bill
-        .parse_csv(&file_bill, global_opts)
+        .parse_csv(&file_bill, filter_opts)
         .expect(&format!("Error parsing the file '{:?}'", file_bill));
     //
     (
@@ -62,11 +62,11 @@ fn load_latest_bill(file_or_folder: &Path, global_opts: &GlobalOpts) -> (Bills, 
     )
 }
 
-pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: &Path, global_opts: &GlobalOpts) {
+pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: &Path, filter_opts: &FilterOpts, debug: bool) {
     println!("Calculating Azure disk cost from csv export.\n");
     let disks = az_disk::AzDisks::parse(&file_disk)
         .expect(&format!("Error parsing the file '{:?}'", file_disk));
-    let (latest_bill, file_name_bill) = load_latest_bill(file_or_folder, global_opts);
+    let (latest_bill, file_name_bill) = load_latest_bill(file_or_folder, filter_opts, debug);
     println!();
     println!(
         "Read {len_disk:?} records from '{f_disk}' and {len_bill:?} records from '{f_bill}'",
@@ -87,12 +87,12 @@ pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: &Path, global_opts: &
     println!("Total cost {total_cost}");
 }
 
-pub fn load_bill(file_or_folder: &Path, global_opts: &GlobalOpts) -> (Bills, String) {
-    let (latest_bill, file_name) = load_latest_bill(file_or_folder, global_opts);
+pub fn load_bill(file_or_folder: &Path, filter_opts: &FilterOpts, debug: bool) -> (Bills, String) {
+    let (latest_bill, file_name) = load_latest_bill(file_or_folder, filter_opts, debug);
     (latest_bill, file_name)
 }
 
-pub fn display_total_cost_summary(bills: &Bills, description: &str, _global_opts: &GlobalOpts) {
+pub fn display_total_cost_summary(bills: &Bills, description: &str) {
     println!(
         "\n===  Displaying Azure cost summary.  {description} {} ===",
         bills.file_short_name
