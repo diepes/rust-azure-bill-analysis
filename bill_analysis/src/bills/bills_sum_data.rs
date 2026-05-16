@@ -23,7 +23,7 @@ pub struct ReservationInfo<'a> {
     pub meter_category: String,
 }
 // set copy trait for CostTotal
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum CostSource {
     Original,
     Secondary,

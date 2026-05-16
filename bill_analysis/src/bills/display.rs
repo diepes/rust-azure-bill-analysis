@@ -10,6 +10,77 @@ use crate::bills::cost_type_enum::CostType;
 use crate::cmd_parse::DisplayOpts;
 use crate::f64_to_currency;
 
+// ── Display data types ────────────────────────────────────────────────────────
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum RowColour { Red, Green, Blue, Cyan }
+
+#[derive(Debug)]
+pub struct PreparedRow {
+    pub cost: f64,
+    pub name: String,
+    pub source: CostSource,
+    pub colour: RowColour,
+    /// true when cost exceeds the display threshold
+    pub visible: bool,
+}
+
+#[derive(Debug)]
+pub struct PreparedSummary {
+    pub rows: Vec<PreparedRow>,
+    pub total: f64,
+    pub total_usd: f64,
+    pub skipped_count: usize,
+}
+
+// ── Pure helper functions (no I/O) ────────────────────────────────────────────
+
+/// Assigns a display colour and visibility flag to each row; returns totals.
+pub(crate) fn prepare_rows(
+    bill_summary: &SummaryData,
+    cost_type: CostType,
+    display_opts: &DisplayOpts,
+) -> PreparedSummary {
+    let (total, total_usd, _cnt, sorted) = sort_calc_total(bill_summary, &cost_type);
+    let mut skipped_count = 0usize;
+    let rows: Vec<PreparedRow> = sorted
+        .into_iter()
+        .map(|(cost, name, source)| {
+            let colour = match source {
+                CostSource::Original => {
+                    if cost < 0.0 { RowColour::Cyan } else { RowColour::Red }
+                }
+                CostSource::Secondary => RowColour::Green,
+                CostSource::Combined => {
+                    if cost < 0.0 { RowColour::Green } else { RowColour::Blue }
+                }
+            };
+            let visible =
+                cost > display_opts.cost_min_display || cost < -display_opts.cost_min_display;
+            if !visible {
+                skipped_count += 1;
+            }
+            PreparedRow { cost, name: name.to_string(), source, colour, visible }
+        })
+        .collect();
+    PreparedSummary { rows, total, total_usd, skipped_count }
+}
+
+/// Returns the legend line for a summary block (pure, no I/O).
+pub(crate) fn legend_text(is_comparison: bool) -> String {
+    if !is_comparison {
+        format!("Legend: {cyan}", cyan = "Cyan=Credit/Refund(negative)".cyan())
+    } else {
+        format!(
+            "Legend: cost colour's {red} {green} {blue} {cyan}",
+            red = "Red=New(only in latest)".red(),
+            green = "Green=Saving(gone or reduced)".green(),
+            blue = "Blue=Increased".blue(),
+            cyan = "Cyan=Credit/Refund(negative)".cyan(),
+        )
+    }
+}
+
 /// Display cost summary.
 /// can also subtract previous_bill
 
@@ -244,8 +315,7 @@ fn sort_calc_total<'a>(
     (total, total_usd, cnt, bill_details_sorted)
 }
 
-/// print_summary for Subscription, ResourceGroup, ResourceName, MeterCategory
-/// called for each summary section to print the cost details
+/// Thin printing adapter: calls prepare_rows + legend_text, then iterates to println!.
 fn print_summary(
     bill_summary: &SummaryData,
     cur: &str,
@@ -253,67 +323,119 @@ fn print_summary(
     display_opts: &DisplayOpts,
     is_comparison: bool,
 ) {
-    let (total, total_usd, cnt, bill_details_sorted) =
-        sort_calc_total(bill_summary, &cost_type);
-    let mut cnt_skip = 0;
+    let prepared = prepare_rows(bill_summary, cost_type, display_opts);
 
-    let color_legend = if !is_comparison {
-        format!("Legend: {cyan}", cyan = "Cyan=Credit/Refund(negative)".cyan())
-    } else {
-        format!(
-            "Legend: cost colour's {red} {green} {blue} {cyan}",
-            red = "Red=New(only in latest)".red(),
-            green = "Green=Saving(gone or reduced)".green(),
-            blue = "Blue=Increased".blue(),
-            cyan = "Cyan=Credit/Refund(negative)".cyan(),
-        )
-    };
-    // print sorted Vec by cost
-    for (cost, name, source) in bill_details_sorted.iter() {
-        let currency = f64_to_currency(*cost, 2);
+    for row in prepared.rows.iter().filter(|r| r.visible) {
+        let currency = f64_to_currency(row.cost, 2);
         let part1 = format!("{cur} {currency:>11}");
-
-        let color_cost = match source {
-            // Original: new item in latest bill. Negative = actual credit/refund.
-            CostSource::Original => {
-                if *cost < 0.0 { part1.cyan().to_string() } else { part1.red().to_string() }
-            }
-            // Secondary: only in previous bill (gone) — always a saving, show green.
-            CostSource::Secondary => part1.green().to_string(),
-            // Combined: in both bills. Negative = cost went down (green), positive = went up (blue).
-            CostSource::Combined => {
-                if *cost < 0.0 { part1.green().to_string() } else { part1.blue().to_string() }
-            }
+        let color_cost = match row.colour {
+            RowColour::Red   => part1.red().to_string(),
+            RowColour::Green => part1.green().to_string(),
+            RowColour::Blue  => part1.blue().to_string(),
+            RowColour::Cyan  => part1.cyan().to_string(),
         };
-        if *cost > display_opts.cost_min_display || *cost < -display_opts.cost_min_display {
-            println!(
-                " bill_details: '{color_cost}' :: {t_short}:'{name}'",
-                t_short = cost_type.as_short(),
-            );
-        } else {
-            cnt_skip += 1;
-        }
+        println!(
+            " bill_details: '{color_cost}' :: {t_short}:'{name}'",
+            t_short = cost_type.as_short(),
+            name = row.name,
+        );
     }
-    if cnt_skip > 0 {
+
+    if prepared.skipped_count > 0 {
         println!(
             " bill_details: skipped {cnt_skip} with cost below < '{cur} {cost_min_display:.2}' Type::{t_short}",
+            cnt_skip = prepared.skipped_count,
             t_short = cost_type.as_short(),
             cost_min_display = display_opts.cost_min_display,
         );
     }
-    if cnt > 0 {
-        let total_colored = if total < 0.0 {
-            // Negative net total = overall saving (comparison) or credit (single bill) — green
-            f64_to_currency(total, 2).green().bold().to_string()
+
+    let total_count = prepared.rows.len();
+    if total_count > 0 {
+        let total_colored = if prepared.total < 0.0 {
+            f64_to_currency(prepared.total, 2).green().bold().to_string()
         } else {
-            f64_to_currency(total, 2).red().bold().to_string()
+            f64_to_currency(prepared.total, 2).red().bold().to_string()
         };
         println!(
-            "     Total #{cnt} {cost_type} filtered cost {cur} {total_colored}  (US$ {total_usd})",
+            "     Total #{total_count} {cost_type} filtered cost {cur} {total_colored}  (US$ {total_usd})",
             cost_type = cost_type.as_str(),
             cur = cur,
-            total_usd = f64_to_currency(total_usd, 2).bold(),
+            total_usd = f64_to_currency(prepared.total_usd, 2).bold(),
         );
-        println!("     {color_legend}");
+        println!("     {}", legend_text(is_comparison));
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bills::bills_sum_data::CostTotal;
+    use crate::cmd_parse::DisplayOpts;
+    use crate::money::{Nzd, Usd};
+
+    fn make_summary(entries: &[(&str, CostType, f64, CostSource)]) -> SummaryData<'static> {
+        let mut s = SummaryData::default();
+        for (name, ct, cost, source) in entries {
+            s.per_type.insert(
+                (ct.clone(), name.to_string()),
+                CostTotal { cost: Nzd(*cost), cost_usd: Usd(*cost), cost_unreserved: 0.0, source: *source },
+            );
+        }
+        s
+    }
+
+    #[test]
+    fn test_legend_text_single_bill() {
+        let text = legend_text(false);
+        assert!(text.contains("Cyan=Credit/Refund(negative)"));
+        assert!(!text.contains("Red="));
+    }
+
+    #[test]
+    fn test_legend_text_comparison() {
+        let text = legend_text(true);
+        assert!(text.contains("Red=New"));
+        assert!(text.contains("Green=Saving"));
+        assert!(text.contains("Blue=Increased"));
+        assert!(text.contains("Cyan=Credit/Refund"));
+    }
+
+    #[test]
+    fn test_prepare_rows_colours() {
+        let summary = make_summary(&[
+            ("new-item",    CostType::ResourceGroup,  50.0, CostSource::Original),
+            ("credit",      CostType::ResourceGroup, -10.0, CostSource::Original),
+            ("gone-item",   CostType::ResourceGroup,  30.0, CostSource::Secondary),
+            ("increased",   CostType::ResourceGroup,  20.0, CostSource::Combined),
+            ("decreased",   CostType::ResourceGroup, -15.0, CostSource::Combined),
+        ]);
+        let opts = DisplayOpts { cost_min_display: 0.0, tag_list: false, debug: false };
+        let prepared = prepare_rows(&summary, CostType::ResourceGroup, &opts);
+
+        let find = |name: &str| prepared.rows.iter().find(|r| r.name == name).unwrap();
+        assert_eq!(find("new-item").colour,  RowColour::Red);
+        assert_eq!(find("credit").colour,    RowColour::Cyan);
+        assert_eq!(find("gone-item").colour, RowColour::Green);
+        assert_eq!(find("increased").colour, RowColour::Blue);
+        assert_eq!(find("decreased").colour, RowColour::Green);
+    }
+
+    #[test]
+    fn test_prepare_rows_visibility_threshold() {
+        let summary = make_summary(&[
+            ("big",   CostType::ResourceGroup, 100.0, CostSource::Original),
+            ("small", CostType::ResourceGroup,   5.0, CostSource::Original),
+        ]);
+        let opts = DisplayOpts { cost_min_display: 10.0, tag_list: false, debug: false };
+        let prepared = prepare_rows(&summary, CostType::ResourceGroup, &opts);
+
+        let big   = prepared.rows.iter().find(|r| r.name == "big").unwrap();
+        let small = prepared.rows.iter().find(|r| r.name == "small").unwrap();
+        assert!(big.visible);
+        assert!(!small.visible);
+        assert_eq!(prepared.skipped_count, 1);
     }
 }
