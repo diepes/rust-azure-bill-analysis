@@ -1,23 +1,35 @@
 //! bill_analysis_mcp — MCP server exposing Azure billing data via Streamable HTTP.
 //!
 //! Implements the 2025 MCP spec (Streamable HTTP transport):
-//!   POST /mcp  — JSON-RPC 2.0 requests
-//!   GET  /mcp  — Health check, returns "Azure billing MCP ok"
+//!   POST /mcp  — JSON-RPC 2.0 requests (requires BillingViewer App Role unless --no-auth)
+//!   GET  /mcp  — Health check
 //!
-//! Usage: bill_analysis_mcp --data-dir <path> [--port <port>] [--host <host>]
+//! OAuth 2.0 Authorization Code + PKCE proxy against Microsoft Entra ID:
+//!   GET  /.well-known/oauth-authorization-server  — OAuth metadata discovery
+//!   GET  /authorize                               — Redirect browser to Entra
+//!   GET  /callback                                — Receive Entra code, issue server code
+//!   POST /token                                   — Exchange server code for Entra access token
+//!
+//! Usage: bill_analysis_mcp --data-dir <path> [--port <port>] [--host <host>] [--no-auth]
+//! Config: ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET, MCP_PUBLIC_URL (.env or env)
 
 use axum::{
     Router,
-    extract::{Request, State},
+    extract::{Query, Request, State},
+    http::StatusCode,
     middleware::{self, Next},
-    response::{IntoResponse, Response},
-    routing::post,
-    Json,
+    response::{IntoResponse, Redirect, Response},
+    routing::{get, post},
+    Form, Json,
 };
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use bill_analysis::{bills::Bills, cmd_parse::FilterOpts, find_files};
 use clap::Parser;
+use jsonwebtoken::{Algorithm, DecodingKey, Validation};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Instant};
 use tokio::sync::RwLock;
 
@@ -32,13 +44,18 @@ struct Args {
     #[arg(long)]
     data_dir: PathBuf,
 
-    /// TCP port to listen on (default: 3000)
-    #[arg(long, default_value_t = 3000)]
-    port: u16,
+    /// TCP port to listen on. Defaults to the port in MCP_PUBLIC_URL, or 3000.
+    #[arg(long)]
+    port: Option<u16>,
 
-    /// Host address to bind to (default: 127.0.0.1)
-    #[arg(long, default_value = "127.0.0.1")]
-    host: String,
+    /// Host address to bind to. Defaults to the host in MCP_PUBLIC_URL, or 127.0.0.1.
+    #[arg(long)]
+    host: Option<String>,
+
+    /// Disable authentication (skip Entra config; all callers are trusted).
+    /// Without this flag the server refuses to start if Entra env vars are missing.
+    #[arg(long)]
+    no_auth: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -47,10 +64,111 @@ struct Args {
 
 type BillCache = Arc<RwLock<HashMap<(u32, u32), Arc<Bills>>>>;
 
+// ---------------------------------------------------------------------------
+// Entra OAuth configuration
+// ---------------------------------------------------------------------------
+
+/// Entra OAuth 2.0 configuration loaded from .env / environment variables.
+#[derive(Clone)]
+struct EntraConfig {
+    tenant_id: String,
+    client_id: String,
+    client_secret: String,
+    /// Base URL of this server (e.g. `http://localhost:3000`).
+    /// `{public_url}/callback` must be a registered redirect URI in the app registration.
+    public_url: String,
+}
+
+impl EntraConfig {
+    fn redirect_uri(&self) -> String {
+        format!("{}/callback", self.public_url)
+    }
+    fn authorize_url(&self) -> String {
+        format!("https://login.microsoftonline.com/{}/oauth2/v2.0/authorize", self.tenant_id)
+    }
+    fn token_url(&self) -> String {
+        format!("https://login.microsoftonline.com/{}/oauth2/v2.0/token", self.tenant_id)
+    }
+    fn jwks_url(&self) -> String {
+        format!("https://login.microsoftonline.com/{}/discovery/v2.0/keys", self.tenant_id)
+    }
+    fn issuer(&self) -> String {
+        format!("https://login.microsoftonline.com/{}/v2.0", self.tenant_id)
+    }
+    fn oidc_discovery_url(&self) -> String {
+        format!(
+            "https://login.microsoftonline.com/{}/.well-known/openid-configuration",
+            self.tenant_id
+        )
+    }
+}
+
+fn load_entra_config() -> Option<EntraConfig> {
+    let tenant_id    = std::env::var("ENTRA_TENANT_ID").ok().filter(|s| !s.is_empty())?;
+    let client_id    = std::env::var("ENTRA_CLIENT_ID").ok().filter(|s| !s.is_empty())?;
+    let client_secret = std::env::var("ENTRA_CLIENT_SECRET").ok().filter(|s| !s.is_empty())?;
+    let public_url   = std::env::var("MCP_PUBLIC_URL").ok().filter(|s| !s.is_empty())?;
+    Some(EntraConfig { tenant_id, client_id, client_secret, public_url })
+}
+
+// ---------------------------------------------------------------------------
+// OAuth flow state types
+// ---------------------------------------------------------------------------
+
+/// Per-authorize-request state, keyed by the server-generated OAuth `state` parameter.
+/// Stored between GET /authorize and GET /callback, pruned after 10 minutes.
+struct PkceFlowState {
+    code_challenge: String,
+    code_challenge_method: String,
+    /// The MCP client's redirect_uri — where we redirect after a successful callback.
+    client_redirect_uri: String,
+    /// The client's original `state` value, echoed back in the redirect.
+    client_state: String,
+    created_at: Instant,
+}
+
+/// Short-lived entry mapping a server-issued authorization code to an Entra access token.
+/// Consumed once in POST /token; pruned after 5 minutes.
+struct TempCodeEntry {
+    access_token: String,
+    code_challenge: String,
+    code_challenge_method: String,
+    created_at: Instant,
+}
+
+/// Cached Entra JSON Web Key Set, refreshed on key-not-found.
+struct JwksCacheEntry {
+    keys: Vec<Value>,
+}
+
+type PkceStateStore = Arc<RwLock<HashMap<String, PkceFlowState>>>;
+type TempCodeStore  = Arc<RwLock<HashMap<String, TempCodeEntry>>>;
+type JwksCache      = Arc<RwLock<Option<JwksCacheEntry>>>;
+
+// ---------------------------------------------------------------------------
+// Authenticated caller identity
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+struct CallerIdentity {
+    oid: String,
+    upn: String,
+    roles: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Shared state
+// ---------------------------------------------------------------------------
+
 #[derive(Clone)]
 struct AppState {
     cache: BillCache,
     data_dir: PathBuf,
+    /// None when --no-auth is set; all MCP callers are trusted.
+    entra: Option<EntraConfig>,
+    pkce_store: PkceStateStore,
+    temp_codes: TempCodeStore,
+    jwks_cache: JwksCache,
 }
 
 // ---------------------------------------------------------------------------
@@ -96,8 +214,9 @@ impl RpcResponse {
 // GET /mcp — health / liveness probe
 // ---------------------------------------------------------------------------
 
-async fn mcp_get_handler() -> impl IntoResponse {
-    "Azure billing MCP ok"
+async fn mcp_get_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let auth = if state.entra.is_some() { "entra" } else { "disabled" };
+    Json(json!({ "status": "ok", "auth": auth }))
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +239,503 @@ async fn log_request(req: Request, next: Next) -> Response {
         );
     }
     resp
+}
+
+// ---------------------------------------------------------------------------
+// OAuth 2.0 — discovery, authorize, callback, token
+// ---------------------------------------------------------------------------
+
+async fn oauth_metadata_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let entra = match &state.entra {
+        Some(e) => e,
+        None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
+    };
+    let base = &entra.public_url;
+    Json(json!({
+        "issuer": base,
+        "authorization_endpoint": format!("{}/authorize", base),
+        "token_endpoint": format!("{}/token", base),
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"],
+        "code_challenge_methods_supported": ["S256"],
+    }))
+    .into_response()
+}
+
+/// RFC 9728 — OAuth 2.0 Protected Resource Metadata.
+/// Served at `/.well-known/oauth-protected-resource` (and the `/mcp` path variant).
+/// Tells OAuth clients which authorization server protects this resource so they
+/// know where to fetch AS metadata (`/.well-known/oauth-authorization-server`).
+async fn oauth_protected_resource_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let entra = match &state.entra {
+        Some(e) => e,
+        None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
+    };
+    let base = &entra.public_url;
+    Json(json!({
+        "resource": format!("{}/mcp", base),
+        "authorization_servers": [base],
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+struct AuthorizeParams {
+    response_type: Option<String>,
+    client_id: Option<String>,
+    redirect_uri: String,
+    state: Option<String>,
+    code_challenge: String,
+    code_challenge_method: Option<String>,
+    scope: Option<String>,
+}
+
+async fn authorize_handler(
+    State(state): State<AppState>,
+    Query(params): Query<AuthorizeParams>,
+) -> Response {
+    let entra = match &state.entra {
+        Some(e) => e.clone(),
+        None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
+    };
+
+    let method = params.code_challenge_method.as_deref().unwrap_or("S256");
+    if method != "S256" {
+        return (StatusCode::BAD_REQUEST, "only S256 code_challenge_method supported")
+            .into_response();
+    }
+
+    let server_state = random_string(32);
+    let client_state = params.state.unwrap_or_default();
+    let scope = params.scope.as_deref().unwrap_or("openid profile email");
+
+    {
+        let mut store = state.pkce_store.write().await;
+        // Prune stale entries (>10 min)
+        store.retain(|_, v| v.created_at.elapsed().as_secs() < 600);
+        store.insert(
+            server_state.clone(),
+            PkceFlowState {
+                code_challenge: params.code_challenge,
+                code_challenge_method: method.to_string(),
+                client_redirect_uri: params.redirect_uri,
+                client_state,
+                created_at: Instant::now(),
+            },
+        );
+    }
+
+    let target = format!(
+        "{}?response_type=code&client_id={}&redirect_uri={}&state={}&scope={}&prompt=select_account",
+        entra.authorize_url(),
+        url_encode(&entra.client_id),
+        url_encode(&entra.redirect_uri()),
+        url_encode(&server_state),
+        url_encode(scope),
+    );
+    Redirect::temporary(&target).into_response()
+}
+
+#[derive(Deserialize)]
+struct CallbackParams {
+    code: Option<String>,
+    state: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
+async fn callback_handler(
+    State(state): State<AppState>,
+    Query(params): Query<CallbackParams>,
+) -> Response {
+    let entra = match &state.entra {
+        Some(e) => e.clone(),
+        None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
+    };
+
+    if let Some(err) = &params.error {
+        let desc = params.error_description.as_deref().unwrap_or("");
+        eprintln!("[auth] Entra authorize error={err} description={desc}");
+        return (StatusCode::BAD_GATEWAY, format!("Entra error: {err}")).into_response();
+    }
+
+    let entra_code = match &params.code {
+        Some(c) => c.clone(),
+        None => return (StatusCode::BAD_REQUEST, "missing code").into_response(),
+    };
+    let server_state = match &params.state {
+        Some(s) => s.clone(),
+        None => return (StatusCode::BAD_REQUEST, "missing state").into_response(),
+    };
+
+    let pkce_entry = {
+        let mut store = state.pkce_store.write().await;
+        match store.remove(&server_state) {
+            Some(e) => e,
+            None => {
+                eprintln!("[auth] FAIL callback unknown or expired state={server_state}");
+                return (StatusCode::BAD_REQUEST, "unknown or expired state").into_response();
+            }
+        }
+    };
+
+    // Exchange code with Entra (confidential client, no PKCE on Entra side)
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(entra.token_url())
+        .form(&[
+            ("client_id", entra.client_id.as_str()),
+            ("client_secret", entra.client_secret.as_str()),
+            ("grant_type", "authorization_code"),
+            ("code", &entra_code),
+            ("redirect_uri", &entra.redirect_uri()),
+        ])
+        .send()
+        .await;
+
+    let token_json: Value = match resp {
+        Ok(r) => match r.json().await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[auth] FAIL token exchange parse error: {e}");
+                return (StatusCode::BAD_GATEWAY, "token exchange failed").into_response();
+            }
+        },
+        Err(e) => {
+            eprintln!("[auth] FAIL token exchange request error: {e}");
+            return (StatusCode::BAD_GATEWAY, "token exchange failed").into_response();
+        }
+    };
+
+    let access_token = match token_json["access_token"].as_str() {
+        Some(t) => t.to_string(),
+        None => {
+            let err = token_json["error"].as_str().unwrap_or("unknown");
+            let desc = token_json["error_description"].as_str().unwrap_or("");
+            eprintln!("[auth] FAIL token exchange entra_error={err} desc={desc}");
+            return (StatusCode::BAD_GATEWAY, "token exchange failed").into_response();
+        }
+    };
+
+    // Issue a short-lived server code
+    let server_code = random_string(40);
+    {
+        let mut codes = state.temp_codes.write().await;
+        // Prune stale entries (>5 min)
+        codes.retain(|_, v| v.created_at.elapsed().as_secs() < 300);
+        codes.insert(
+            server_code.clone(),
+            TempCodeEntry {
+                access_token,
+                code_challenge: pkce_entry.code_challenge,
+                code_challenge_method: pkce_entry.code_challenge_method,
+                created_at: Instant::now(),
+            },
+        );
+    }
+
+    let redirect = format!(
+        "{}?code={}&state={}",
+        pkce_entry.client_redirect_uri,
+        url_encode(&server_code),
+        url_encode(&pkce_entry.client_state),
+    );
+    Redirect::temporary(&redirect).into_response()
+}
+
+#[derive(Deserialize)]
+struct TokenRequest {
+    grant_type: Option<String>,
+    code: String,
+    code_verifier: String,
+    redirect_uri: Option<String>,
+    client_id: Option<String>,
+}
+
+async fn token_handler(
+    State(state): State<AppState>,
+    Form(req): Form<TokenRequest>,
+) -> Response {
+    if state.entra.is_none() {
+        return (StatusCode::NOT_FOUND, "auth disabled").into_response();
+    }
+
+    let entry = {
+        let mut codes = state.temp_codes.write().await;
+        match codes.remove(&req.code) {
+            Some(e) => e,
+            None => {
+                eprintln!("[auth] FAIL token exchange unknown or expired code");
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error":"invalid_grant","error_description":"unknown or expired code"})),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    // Validate PKCE: SHA256(code_verifier) == code_challenge
+    let computed = URL_SAFE_NO_PAD.encode(Sha256::digest(req.code_verifier.as_bytes()));
+    if computed != entry.code_challenge {
+        eprintln!("[auth] FAIL PKCE verification failed");
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error":"invalid_grant","error_description":"PKCE verification failed"})),
+        )
+            .into_response();
+    }
+
+    Json(json!({
+        "access_token": entry.access_token,
+        "token_type": "Bearer",
+        "expires_in": 3600,
+    }))
+    .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// JWT validation and auth middleware
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct EntraClaims {
+    oid: String,
+    /// Entra v2 access tokens use `preferred_username`; v1 tokens may use `upn`.
+    #[serde(alias = "upn", alias = "unique_name", default)]
+    preferred_username: String,
+    #[serde(default)]
+    roles: Vec<String>,
+}
+
+async fn get_jwks(entra: &EntraConfig, cache: &JwksCache, kid: &str) -> Option<Vec<Value>> {
+    {
+        let lock = cache.read().await;
+        if let Some(entry) = lock.as_ref() {
+            if entry.keys.iter().any(|k| k["kid"] == kid) {
+                return Some(entry.keys.clone());
+            }
+        }
+    }
+    // Refresh
+    let client = reqwest::Client::new();
+    let resp = client.get(entra.jwks_url()).send().await.ok()?;
+    let body: Value = resp.json().await.ok()?;
+    let keys: Vec<Value> = body["keys"].as_array()?.clone();
+    {
+        let mut lock = cache.write().await;
+        *lock = Some(JwksCacheEntry { keys: keys.clone() });
+    }
+    Some(keys)
+}
+
+async fn validate_jwt(
+    token: &str,
+    entra: &EntraConfig,
+    jwks_cache: &JwksCache,
+) -> Result<CallerIdentity, String> {
+    // Decode header to get kid
+    let header = jsonwebtoken::decode_header(token).map_err(|e| format!("bad header: {e}"))?;
+    let kid = header.kid.as_deref().unwrap_or("").to_string();
+
+    let keys = get_jwks(entra, jwks_cache, &kid)
+        .await
+        .ok_or_else(|| "failed to fetch JWKS".to_string())?;
+
+    let jwk = keys.iter().find(|k| k["kid"] == kid).ok_or_else(|| "kid not found in JWKS".to_string())?;
+
+    let n = jwk["n"].as_str().ok_or("missing n")?;
+    let e = jwk["e"].as_str().ok_or("missing e")?;
+    let decoding_key = DecodingKey::from_rsa_components(n, e).map_err(|e| format!("bad key: {e}"))?;
+
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.set_audience(&[&entra.client_id]);
+    validation.set_issuer(&[&entra.issuer()]);
+
+    let token_data = jsonwebtoken::decode::<EntraClaims>(token, &decoding_key, &validation)
+        .map_err(|e| format!("{e}"))?;
+
+    Ok(CallerIdentity {
+        oid: token_data.claims.oid,
+        upn: token_data.claims.preferred_username,
+        roles: token_data.claims.roles,
+    })
+}
+
+fn unauthorized_response(public_url: &str, description: &str) -> Response {
+    let resource_metadata =
+        format!("{public_url}/.well-known/oauth-protected-resource");
+    (
+        StatusCode::UNAUTHORIZED,
+        [
+            (
+                "WWW-Authenticate",
+                format!(
+                    "Bearer realm=\"{public_url}\", \
+                     resource_metadata=\"{resource_metadata}\""
+                ),
+            ),
+            ("Content-Type", "text/plain".to_string()),
+        ],
+        description.to_string(),
+    )
+        .into_response()
+}
+
+async fn require_auth(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let entra = match &state.entra {
+        Some(e) => e.clone(),
+        None => return next.run(req).await, // --no-auth
+    };
+
+    let auth_header = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    let token = if let Some(t) = auth_header.strip_prefix("Bearer ") {
+        t.to_string()
+    } else {
+        eprintln!("[auth] FAIL missing Authorization header");
+        return unauthorized_response(&entra.public_url, "missing Authorization header");
+    };
+
+    match validate_jwt(&token, &entra, &state.jwks_cache).await {
+        Ok(caller) => {
+            if !caller.roles.contains(&"BillingViewer".to_string()) {
+                eprintln!(
+                    "[auth] FAIL missing_role oid={} upn={} roles={:?}",
+                    caller.oid, caller.upn, caller.roles
+                );
+                return (
+                    StatusCode::FORBIDDEN,
+                    "missing required App Role: BillingViewer",
+                )
+                    .into_response();
+            }
+            eprintln!(
+                "[auth] OK oid={} upn={} roles={:?}",
+                caller.oid, caller.upn, caller.roles
+            );
+            next.run(req).await
+        }
+        Err(reason) => {
+            eprintln!("[auth] FAIL token validation: {reason}");
+            unauthorized_response(&entra.public_url, &format!("invalid token: {reason}"))
+        }
+    }
+}
+
+async fn startup_validate_entra(entra: &EntraConfig, bind_port: u16) {
+    eprintln!("[startup] Validating Entra configuration ...");
+
+    // Warn if MCP_PUBLIC_URL port doesn't match the actual bind port
+    if let Some(url_port) = entra.public_url
+        .split(':')
+        .last()
+        .and_then(|p| p.trim_end_matches('/').parse::<u16>().ok())
+    {
+        if url_port != bind_port {
+            eprintln!(
+                "[startup] ⚠ WARNING: MCP_PUBLIC_URL port ({url_port}) does not match \
+                 --port ({bind_port}). The callback URL will be unreachable.\n\
+                 \x20 Fix: set MCP_PUBLIC_URL=http://localhost:{bind_port} or run with --port {url_port}"
+            );
+        }
+    }
+
+    // 1. OIDC discovery — proves tenant_id is valid, warms JWKS metadata
+    let client = reqwest::Client::new();
+    match client.get(entra.oidc_discovery_url()).send().await {
+        Ok(r) if r.status().is_success() => {
+            eprintln!("[startup] ✓ Entra OIDC discovery OK (tenant_id valid)");
+        }
+        Ok(r) => {
+            eprintln!("[startup] ✗ Entra OIDC discovery returned {}: check ENTRA_TENANT_ID", r.status());
+        }
+        Err(e) => {
+            eprintln!("[startup] ✗ Entra OIDC discovery request failed: {e}");
+        }
+    }
+
+    // 2. Client credentials probe — validates client_id + client_secret
+    let probe = client
+        .post(entra.token_url())
+        .form(&[
+            ("grant_type", "client_credentials"),
+            ("client_id", &entra.client_id),
+            ("client_secret", &entra.client_secret),
+            ("scope", &format!("{}/.default", entra.client_id)),
+        ])
+        .send()
+        .await;
+
+    match probe {
+        Ok(r) => {
+            let body: Value = r.json().await.unwrap_or_default();
+            if body["error"].is_null() {
+                eprintln!("[startup] ✓ Entra client credentials probe OK (client_id/secret valid)");
+            } else {
+                let err = body["error"].as_str().unwrap_or("?");
+                let desc = body["error_description"].as_str().unwrap_or("");
+                eprintln!("[startup] ✗ Client credentials probe error={err}: {desc}");
+                eprintln!("[startup]   → check ENTRA_CLIENT_ID and ENTRA_CLIENT_SECRET");
+            }
+        }
+        Err(e) => {
+            eprintln!("[startup] ✗ Client credentials probe request failed: {e}");
+        }
+    }
+
+    // 3. Redirect URI — advisory only (can't validate without Graph API perms)
+    eprintln!(
+        "[startup] ℹ Callback URL (must be registered in app registration): {}",
+        entra.redirect_uri()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Parse `host` and `port` from a URL like `http://localhost:8091`.
+/// Maps `localhost` → `127.0.0.1` for binding. Returns `None` if unparseable.
+fn parse_bind_addr_from_url(url: &str) -> Option<(String, u16)> {
+    // Strip scheme
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    // Take only the authority (before any path)
+    let authority = rest.split('/').next()?;
+    // Split host:port
+    let (host, port_str) = authority.rsplit_once(':')?;
+    let port: u16 = port_str.parse().ok()?;
+    let host = if host == "localhost" { "127.0.0.1" } else { host }.to_string();
+    Some((host, port))
+}
+
+fn random_string(len: usize) -> String {
+    let mut rng = rand::thread_rng();
+    (0..len).map(|_| char::from(rng.gen_range(b'a'..=b'z'))).collect()
+}
+
+/// Percent-encode non-unreserved URI characters.
+fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -688,19 +1304,73 @@ mod tests {
 
 #[tokio::main]
 async fn main() {
+    // Load .env file from current directory (advisory — no-op if absent)
+    dotenvy::dotenv().ok();
+
     let args = Args::parse();
+
+    // Resolve Entra config unless --no-auth was set
+    let entra: Option<EntraConfig> = if args.no_auth {
+        eprintln!("[bill_analysis_mcp] WARNING: --no-auth set, all callers trusted");
+        None
+    } else {
+        match load_entra_config() {
+            Some(cfg) => Some(cfg),
+            None => {
+                eprintln!(
+                    "[bill_analysis_mcp] ERROR: missing required env vars \
+                     (ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET, MCP_PUBLIC_URL).\n\
+                     Copy .env.example to .env and fill in the values, or pass --no-auth to \
+                     disable authentication."
+                );
+                std::process::exit(1);
+            }
+        }
+    };
+
+    // Resolve bind host/port: CLI flag > MCP_PUBLIC_URL > hardcoded defaults
+    let url_addr = entra.as_ref().and_then(|e| parse_bind_addr_from_url(&e.public_url));
+    let bind_host = args.host
+        .unwrap_or_else(|| url_addr.as_ref().map(|(h, _)| h.clone()).unwrap_or_else(|| "127.0.0.1".to_string()));
+    let bind_port = args.port
+        .unwrap_or_else(|| url_addr.as_ref().map(|(_, p)| *p).unwrap_or(3000));
+
+    // Validate Entra app registration at startup
+    if let Some(ref cfg) = entra {
+        startup_validate_entra(cfg, bind_port).await;
+    }
 
     let state = AppState {
         cache: Arc::new(RwLock::new(HashMap::new())),
         data_dir: args.data_dir.clone(),
+        entra,
+        pkce_store: Arc::new(RwLock::new(HashMap::new())),
+        temp_codes: Arc::new(RwLock::new(HashMap::new())),
+        jwks_cache: Arc::new(RwLock::new(None)),
     };
 
     let app = Router::new()
-        .route("/mcp", post(mcp_handler).get(mcp_get_handler))
+        .route(
+            "/mcp",
+            post(mcp_handler)
+                .route_layer(middleware::from_fn_with_state(state.clone(), require_auth))
+                .get(mcp_get_handler),
+        )
+        .route("/.well-known/oauth-authorization-server", get(oauth_metadata_handler))
+        // Path-based variants probed by MCP clients (RFC 8414 §3.1 / RFC 9728 §5)
+        .route("/.well-known/oauth-authorization-server/mcp", get(oauth_metadata_handler))
+        .route("/.well-known/openid-configuration/mcp", get(oauth_metadata_handler))
+        // RFC 9728 — Protected Resource Metadata (primary + path variants)
+        .route("/.well-known/oauth-protected-resource", get(oauth_protected_resource_handler))
+        .route("/.well-known/oauth-protected-resource/mcp", get(oauth_protected_resource_handler))
+        .route("/mcp/.well-known/oauth-protected-resource", get(oauth_protected_resource_handler))
+        .route("/authorize", get(authorize_handler))
+        .route("/callback", get(callback_handler))
+        .route("/token", post(token_handler))
         .with_state(state)
         .layer(middleware::from_fn(log_request));
 
-    let addr = format!("{}:{}", args.host, args.port);
+    let addr = format!("{bind_host}:{bind_port}");
     eprintln!("[bill_analysis_mcp] listening on http://{addr}/mcp");
     eprintln!("[bill_analysis_mcp] data-dir: {:?}", args.data_dir);
 
