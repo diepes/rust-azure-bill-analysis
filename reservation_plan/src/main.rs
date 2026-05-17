@@ -188,11 +188,10 @@ fn is_expired(state: &str) -> bool {
 
 fn parse_threshold_arg(args: &[String], flag: &str, default: f64) -> f64 {
     for i in 0..args.len() {
-        if args[i] == flag && i + 1 < args.len() {
-            if let Ok(value) = args[i + 1].parse::<f64>() {
+        if args[i] == flag && i + 1 < args.len()
+            && let Ok(value) = args[i + 1].parse::<f64>() {
                 return value;
             }
-        }
     }
     default
 }

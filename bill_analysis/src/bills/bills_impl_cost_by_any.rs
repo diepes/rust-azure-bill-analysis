@@ -25,38 +25,27 @@ impl Bills {
         // iter through bills, get total and update new bill_details for each category.
         let filtered_total = self.bills.iter().fold((Nzd::default(), Usd::default()), |acc, bill| {
             let mut flag_match = true;
-            if !filter.name.is_empty() && !filter.re_name.is_match(&bill.resource_name) {
+            if (!filter.name.is_empty() && !filter.re_name.is_match(&bill.resource_name))
+                || (!filter.resource_group.is_empty() && !filter.re_resource_group.is_match(&bill.resource_group))
+                || (!filter.subscription.is_empty() && !filter.re_subscription.is_match(&bill.subscription_name))
+                || (!filter.meter_category.is_empty() && !filter.re_meter_category.is_match(&bill.meter_category))
+                || (!filter.tag_filter.is_empty() && !filter.re_tag_filter.is_match(&bill.tags.value)) // Check tags hashmap for match
+                || (!filter.reservation.is_empty() && !filter.re_reservation.is_match(&bill.benefit_name))
+                || (!filter.invoice_section.is_empty() && !filter.re_invoice_section.is_match(&bill.invoice_section))
+                || match (
+                    filter.location.as_str(),
+                    filter.location.len(),
+                    filter.re_location.is_match(&bill.resource_location),
+                    bill.resource_location.len(),
+                ) {
+                    ("any" , _, _    , _) => false, // any(default) any region ok, leave flag_match unchanged
+                    ("all" , _, _    , _) => false, // any(default) any region ok, leave flag_match unchanged
+                    ("none", _, _    , 1..) => true, // if value set for resource_location, set to false to skip
+                    (_, _, true, _) => false, // if location_regex set and match, leave unchanged
+                    (_     , _, false, _) => true, // if location_regex set and no match, set to false to skip
+                }
+            {
                 flag_match = false; // if filter set and no match skip
-            } else if !filter.resource_group.is_empty() && !filter.re_resource_group.is_match(&bill.resource_group) {
-                flag_match = false;
-            } else if !filter.subscription.is_empty() && !filter.re_subscription.is_match(&bill.subscription_name) {
-                flag_match = false;
-            } else if !filter.meter_category.is_empty() && !filter.re_meter_category.is_match(&bill.meter_category) {
-                flag_match = false;
-            // Check tags hashmap for match
-            } else if !filter.tag_filter.is_empty() && !filter.re_tag_filter.is_match(&bill.tags.value) {
-                flag_match = false;
-            } else if !filter.reservation.is_empty() && !filter.re_reservation.is_match(&bill.benefit_name)
-            {
-                flag_match = false;
-            } else if !filter.invoice_section.is_empty()
-                && !filter.re_invoice_section.is_match(&bill.invoice_section)
-            {
-                flag_match = false;
-            } else if match (
-                filter.location.as_str(),
-                filter.location.len(),
-                filter.re_location.is_match(&bill.resource_location),
-                bill.resource_location.len(),
-            ) {
-                ("any" , _, _    , _) => false, // any(default) any region ok, leave flag_match unchanged
-                ("all" , _, _    , _) => false, // any(default) any region ok, leave flag_match unchanged
-                ("none", _, _    , 1..) => true, // empty region. if value set for resource_location, set to false to skip
-                (_, _, true, _) => false, // if location_regex set and match, leave unchanged
-                //(_    , 1.., _  , 0) => false, // if location_regex set(len>0) and resource_location not set , set to false to skip
-                (_     , _, false, _) => true, // if location_regex set and no match, set to false to skip
-            } {
-                flag_match = false;
             }
             if flag_match {
                 // if flag_match still true (no filter above excluded this bill) add to summary_data

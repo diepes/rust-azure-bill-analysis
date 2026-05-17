@@ -29,7 +29,7 @@ impl Bills {
             .collect();
         for file_path in file_paths {
             self.parse_csv(&file_path, filter_opts)
-                .expect(&format!("Error parsing the file '{:?}'", file_path));
+                .unwrap_or_else(|_| panic!("Error parsing the file '{:?}'", file_path));
             println!();
             println!(
                 "Read {len:?} records from '{f_name}'",

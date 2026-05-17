@@ -43,8 +43,8 @@ fn fetch_all_reservations_internal(force_refresh: bool) -> Result<Vec<Reservatio
     let cache_file = get_cache_filename();
 
     // Try to load from cache first (unless force refresh)
-    if !force_refresh {
-        if let Ok(cached_reservations) = load_from_cache(&cache_file) {
+    if !force_refresh
+        && let Ok(cached_reservations) = load_from_cache(&cache_file) {
             println!(
                 "Loaded {} reservations from cache: {}",
                 cached_reservations.len(),
@@ -52,7 +52,6 @@ fn fetch_all_reservations_internal(force_refresh: bool) -> Result<Vec<Reservatio
             );
             return Ok(cached_reservations);
         }
-    }
 
     // Cache miss or force refresh - fetch from Azure
     if force_refresh {
@@ -146,7 +145,7 @@ fn fetch_reservations_from_azure() -> Result<Vec<Reservation>> {
 
 fn get_reservation_order_ids() -> Result<Vec<String>> {
     let output = Command::new("az")
-        .args(&[
+        .args([
             "reservations",
             "reservation-order",
             "list",
@@ -197,7 +196,7 @@ fn get_reservations_for_order(order_id: &str) -> Result<Vec<Reservation>> {
     );
 
     let output = Command::new("az")
-        .args(&[
+        .args([
             "reservations",
             "reservation",
             "list",
@@ -235,7 +234,7 @@ pub fn fetch_reservation_costs() -> Result<std::collections::HashMap<String, f64
         Err(_) => {
             println!("MANAGEMENT_SUBSCRIPTION_ID not found in .env, querying Azure CLI...");
             let output = Command::new("az")
-                .args(&["account", "show", "--query", "id", "-o", "tsv"])
+                .args(["account", "show", "--query", "id", "-o", "tsv"])
                 .output()
                 .context("Failed to execute 'az account show' command. Make sure Azure CLI is installed and you're logged in.")?;
             
@@ -309,7 +308,7 @@ pub fn fetch_reservation_costs() -> Result<std::collections::HashMap<String, f64
     println!("Fetching reservation costs from Cost Management API...");
 
     let output = Command::new("az")
-        .args(&[
+        .args([
             "rest",
             "--method", "post",
             "--uri", &uri,
@@ -334,17 +333,15 @@ pub fn fetch_reservation_costs() -> Result<std::collections::HashMap<String, f64
     // Parse the response structure
     if let Some(rows) = response["properties"]["rows"].as_array() {
         for row in rows {
-            if let Some(row_array) = row.as_array() {
-                if row_array.len() >= 2 {
-                    if let (Some(cost), Some(reservation_id)) = 
+            if let Some(row_array) = row.as_array()
+                && row_array.len() >= 2
+                    && let (Some(cost), Some(reservation_id)) = 
                         (row_array[0].as_f64(), row_array[1].as_str()) {
                         // Only store non-empty reservation IDs
                         if !reservation_id.is_empty() {
                             costs.insert(reservation_id.to_string(), cost);
                         }
                     }
-                }
-            }
         }
     }
 

@@ -89,7 +89,7 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
 
     println!("\n  By Resource Type:");
     let mut by_type_vec: Vec<_> = by_type.iter().collect();
-    by_type_vec.sort_by(|a, b| b.1.0.cmp(&a.1.0)); // Sort by quantity descending
+    by_type_vec.sort_by_key(|b| std::cmp::Reverse(b.1.0)); // Sort by quantity descending
     for (rtype, (quantity, count, cost, remaining_months_list)) in by_type_vec {
         let avg_remaining = if !remaining_months_list.is_empty() {
             remaining_months_list.iter().sum::<u32>() as f64 / remaining_months_list.len() as f64
@@ -101,7 +101,7 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
         // If it's VirtualMachines, show the breakdown by VM type, sorted by quantity
         if rtype == "VirtualMachines" && !by_vm_type.is_empty() {
             let mut vm_type_vec: Vec<_> = by_vm_type.iter().collect();
-            vm_type_vec.sort_by(|a, b| b.1.0.cmp(&a.1.0)); // Sort by quantity descending
+            vm_type_vec.sort_by_key(|b| std::cmp::Reverse(b.1.0)); // Sort by quantity descending
             for (vm_type, (vm_quantity, vm_count, vm_cost, vm_remaining_months_list)) in vm_type_vec {
                 let vm_avg_remaining = if !vm_remaining_months_list.is_empty() {
                     vm_remaining_months_list.iter().sum::<u32>() as f64 / vm_remaining_months_list.len() as f64

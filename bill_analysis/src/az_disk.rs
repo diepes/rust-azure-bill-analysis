@@ -48,10 +48,10 @@ impl AzDisks {
     pub fn parse(file_disk: &PathBuf) -> Result<AzDisks, Box<dyn Error>> {
         let disks = if file_disk.extension().unwrap() == "csv" {
             Self::parse_csv(file_disk)
-                .expect(&format!("Error parsing the csv file '{:?}'", file_disk))
+                .unwrap_or_else(|_| panic!("Error parsing the csv file '{:?}'", file_disk))
         } else {
             Self::parse_txt(file_disk)
-                .expect(&format!("Error parsing the txt file '{:?}'", file_disk))
+                .unwrap_or_else(|_| panic!("Error parsing the txt file '{:?}'", file_disk))
         };
         Ok(disks)
     }

@@ -202,18 +202,18 @@ pub fn in_folder(
     } else {
         folder = path
             .parent()
-            .expect(&format!("Failed to split directory '{}'", path.display()))
+            .unwrap_or_else(|| panic!("Failed to split directory '{}'", path.display()))
             .to_path_buf();
         file_search = path
             .file_name()
-            .expect(&format!("Failed to split file '{}'", path.display()))
+            .unwrap_or_else(|| panic!("Failed to split file '{}'", path.display()))
             .to_str()
             .unwrap();
         // = file_name;
     };
     let re = Regex::new(file_search).unwrap(); // Use `Regex` directly without the `regex::` prefix
     for entry in
-        fs::read_dir(&folder).expect(&format!("Failed to read directory '{}'", path.display()))
+        fs::read_dir(&folder).unwrap_or_else(|_| panic!("Failed to read directory '{}'", path.display()))
     {
         let entry = entry.unwrap();
         let path = entry.path();

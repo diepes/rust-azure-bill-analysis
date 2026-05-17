@@ -29,6 +29,7 @@ pub enum CostSource {
     Secondary,
     Combined,
 }
+#[derive(Default)]
 pub struct SummaryData<'a> {
     // Created by "pub fn cost_by_any_summary() in bills.rs"
     // Subtract old in pub fn display_cost_by_filter() in display.rs
@@ -95,14 +96,3 @@ impl<'a> SummaryData<'a> {
     }
 }
 
-impl<'a> Default for SummaryData<'a> {
-    fn default() -> SummaryData<'a> {
-        SummaryData {
-            per_type: std::collections::HashMap::new(),
-            details: std::collections::HashSet::new(),
-            filtered_cost_total: Nzd::default(),
-            filtered_cost_total_usd: Usd::default(),
-            reservations: std::collections::HashMap::new(),
-        }
-    }
-}

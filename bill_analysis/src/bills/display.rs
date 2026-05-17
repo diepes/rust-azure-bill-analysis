@@ -83,7 +83,6 @@ pub(crate) fn legend_text(is_comparison: bool) -> String {
 
 /// Display cost summary.
 /// can also subtract previous_bill
-
 pub fn display_cost_by_filter(
     filter: &BillFilter,
     // file_or_folder: PathBuf,
@@ -218,8 +217,7 @@ pub fn display_cost_by_filter(
                     // get reservation names convert to vec and sort them
                     let mut rn = reservation
                         .reservation_names
-                        .iter()
-                        .map(|s| *s)
+                        .iter().copied()
                         .collect::<Vec<&str>>();
                     rn.sort();
                     let rn = rn.join(", ").blue();

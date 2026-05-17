@@ -48,6 +48,7 @@ impl BillFilter {
     /// (e.g. tag key lookup).
     ///
     /// Returns `Err` if any pattern is not a valid regex expression.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: Option<String>,
         resource_group: Option<String>,

@@ -54,7 +54,7 @@ fn load_latest_bill(file_or_folder: &Path, filter_opts: &FilterOpts, debug: bool
     let mut latest_bill: Bills = Bills::default();
     latest_bill
         .parse_csv(&file_bill, filter_opts)
-        .expect(&format!("Error parsing the file '{:?}'", file_bill));
+        .unwrap_or_else(|_| panic!("Error parsing the file '{:?}'", file_bill));
     //
     (
         latest_bill,
@@ -65,7 +65,7 @@ fn load_latest_bill(file_or_folder: &Path, filter_opts: &FilterOpts, debug: bool
 pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: &Path, filter_opts: &FilterOpts, debug: bool) {
     println!("Calculating Azure disk cost from csv export.\n");
     let disks = az_disk::AzDisks::parse(&file_disk)
-        .expect(&format!("Error parsing the file '{:?}'", file_disk));
+        .unwrap_or_else(|_| panic!("Error parsing the file '{:?}'", file_disk));
     let (latest_bill, file_name_bill) = load_latest_bill(file_or_folder, filter_opts, debug);
     println!();
     println!(

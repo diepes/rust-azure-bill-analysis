@@ -129,6 +129,7 @@ struct PkceFlowState {
 
 /// Short-lived entry mapping a server-issued authorization code to an Entra access token.
 /// Consumed once in POST /token; pruned after 5 minutes.
+#[allow(dead_code)]
 struct TempCodeEntry {
     access_token: String,
     code_challenge: String,
@@ -280,6 +281,7 @@ async fn oauth_protected_resource_handler(State(state): State<AppState>) -> impl
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct AuthorizeParams {
     response_type: Option<String>,
     client_id: Option<String>,
@@ -444,6 +446,7 @@ async fn callback_handler(
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct TokenRequest {
     grant_type: Option<String>,
     code: String,
@@ -511,11 +514,10 @@ struct EntraClaims {
 async fn get_jwks(entra: &EntraConfig, cache: &JwksCache, kid: &str) -> Option<Vec<Value>> {
     {
         let lock = cache.read().await;
-        if let Some(entry) = lock.as_ref() {
-            if entry.keys.iter().any(|k| k["kid"] == kid) {
+        if let Some(entry) = lock.as_ref()
+            && entry.keys.iter().any(|k| k["kid"] == kid) {
                 return Some(entry.keys.clone());
             }
-        }
     }
     // Refresh
     let client = reqwest::Client::new();
@@ -637,17 +639,15 @@ async fn startup_validate_entra(entra: &EntraConfig, bind_port: u16) {
     // Warn if MCP_PUBLIC_URL port doesn't match the actual bind port
     if let Some(url_port) = entra.public_url
         .split(':')
-        .last()
+        .next_back()
         .and_then(|p| p.trim_end_matches('/').parse::<u16>().ok())
-    {
-        if url_port != bind_port {
+        && url_port != bind_port {
             eprintln!(
                 "[startup] ⚠ WARNING: MCP_PUBLIC_URL port ({url_port}) does not match \
                  --port ({bind_port}). The callback URL will be unreachable.\n\
                  \x20 Fix: set MCP_PUBLIC_URL=http://localhost:{bind_port} or run with --port {url_port}"
             );
         }
-    }
 
     // 1. OIDC discovery — proves tenant_id is valid, warms JWKS metadata
     let client = reqwest::Client::new();
@@ -1007,11 +1007,10 @@ fn compute_cost(
     let mut by_key: HashMap<String, (f64, usize)> = HashMap::new();
 
     for entry in &bills.bills {
-        if let Some(date) = date_filter {
-            if entry.date != date {
+        if let Some(date) = date_filter
+            && entry.date != date {
                 continue;
             }
-        }
         if !rg_lower.is_empty() && !entry.resource_group.contains(rg_lower.as_str()) {
             continue;
         }
