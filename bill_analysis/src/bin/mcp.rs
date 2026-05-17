@@ -11,7 +11,8 @@
 //!   POST /token                                   — Exchange server code for Entra access token
 //!
 //! Usage: bill_analysis_mcp --data-dir <path> [--port <port>] [--host <host>] [--no-auth]
-//! Config: ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET, MCP_PUBLIC_URL (.env or env)
+//! Config: ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET,
+//!         MCP_PUBLIC_URL, MCP_CALLBACK_URL (optional; .env or env)
 
 use axum::{
     Router,
@@ -74,14 +75,13 @@ struct EntraConfig {
     tenant_id: String,
     client_id: String,
     client_secret: String,
-    /// Base URL of this server (e.g. `http://localhost:3000`).
-    /// `{public_url}/callback` must be a registered redirect URI in the app registration.
-    public_url: String,
+    /// Base URL used for both public and callback purposes.
+    url: String,
 }
 
 impl EntraConfig {
     fn redirect_uri(&self) -> String {
-        format!("{}/callback", self.public_url)
+        format!("{}/callback", self.url)
     }
     fn authorize_url(&self) -> String {
         format!("https://login.microsoftonline.com/{}/oauth2/v2.0/authorize", self.tenant_id)
@@ -107,8 +107,9 @@ fn load_entra_config() -> Option<EntraConfig> {
     let tenant_id    = std::env::var("ENTRA_TENANT_ID").ok().filter(|s| !s.is_empty())?;
     let client_id    = std::env::var("ENTRA_CLIENT_ID").ok().filter(|s| !s.is_empty())?;
     let client_secret = std::env::var("ENTRA_CLIENT_SECRET").ok().filter(|s| !s.is_empty())?;
-    let public_url   = std::env::var("MCP_PUBLIC_URL").ok().filter(|s| !s.is_empty())?;
-    Some(EntraConfig { tenant_id, client_id, client_secret, public_url })
+    let url          = std::env::var("MCP_URL").ok().filter(|s| !s.is_empty())?; // Single URL
+
+    Some(EntraConfig { tenant_id, client_id, client_secret, url })
 }
 
 // ---------------------------------------------------------------------------
@@ -251,16 +252,17 @@ async fn oauth_metadata_handler(State(state): State<AppState>) -> impl IntoRespo
         Some(e) => e,
         None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
     };
-    let base = &entra.public_url;
-    Json(json!({
+    let base = &entra.url;
+    let body = json!({
         "issuer": base,
         "authorization_endpoint": format!("{}/authorize", base),
         "token_endpoint": format!("{}/token", base),
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code"],
         "code_challenge_methods_supported": ["S256"],
-    }))
-    .into_response()
+    });
+    eprintln!("[oauth] authorization-server metadata: {body}");
+    Json(body).into_response()
 }
 
 /// RFC 9728 — OAuth 2.0 Protected Resource Metadata.
@@ -272,12 +274,13 @@ async fn oauth_protected_resource_handler(State(state): State<AppState>) -> impl
         Some(e) => e,
         None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
     };
-    let base = &entra.public_url;
-    Json(json!({
+    let base = &entra.url;
+    let body = json!({
         "resource": format!("{}/mcp", base),
         "authorization_servers": [base],
-    }))
-    .into_response()
+    });
+    eprintln!("[oauth] protected-resource: {body}");
+    Json(body).into_response()
 }
 
 #[derive(Deserialize)]
@@ -296,6 +299,8 @@ async fn authorize_handler(
     State(state): State<AppState>,
     Query(params): Query<AuthorizeParams>,
 ) -> Response {
+    eprintln!("[oauth] /authorize called with client_id={:?}, redirect_uri={}", params.client_id, params.redirect_uri);
+    
     let entra = match &state.entra {
         Some(e) => e.clone(),
         None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
@@ -303,6 +308,7 @@ async fn authorize_handler(
 
     let method = params.code_challenge_method.as_deref().unwrap_or("S256");
     if method != "S256" {
+        eprintln!("[oauth] FAIL /authorize unsupported code_challenge_method={}", method);
         return (StatusCode::BAD_REQUEST, "only S256 code_challenge_method supported")
             .into_response();
     }
@@ -335,6 +341,7 @@ async fn authorize_handler(
         url_encode(&server_state),
         url_encode(scope),
     );
+    eprintln!("[oauth] /authorize redirecting to Entra: {}", target);
     Redirect::temporary(&target).into_response()
 }
 
@@ -604,7 +611,7 @@ async fn require_auth(
         t.to_string()
     } else {
         eprintln!("[auth] FAIL missing Authorization header");
-        return unauthorized_response(&entra.public_url, "missing Authorization header");
+        return unauthorized_response(&entra.url, "missing Authorization header");
     };
 
     match validate_jwt(&token, &entra, &state.jwks_cache).await {
@@ -628,7 +635,7 @@ async fn require_auth(
         }
         Err(reason) => {
             eprintln!("[auth] FAIL token validation: {reason}");
-            unauthorized_response(&entra.public_url, &format!("invalid token: {reason}"))
+            unauthorized_response(&entra.url, &format!("invalid token: {reason}"))
         }
     }
 }
@@ -636,16 +643,14 @@ async fn require_auth(
 async fn startup_validate_entra(entra: &EntraConfig, bind_port: u16) {
     eprintln!("[startup] Validating Entra configuration ...");
 
-    // Warn if MCP_PUBLIC_URL port doesn't match the actual bind port
-    if let Some(url_port) = entra.public_url
-        .split(':')
-        .next_back()
+    // Warn if callback URL port doesn't match the actual bind port.
+    if let Some(url_port) = entra.url.split(':').nth(1)
         .and_then(|p| p.trim_end_matches('/').parse::<u16>().ok())
         && url_port != bind_port {
             eprintln!(
-                "[startup] ⚠ WARNING: MCP_PUBLIC_URL port ({url_port}) does not match \
+                "[startup] ⚠ WARNING: MCP_CALLBACK_URL port ({url_port}) does not match \
                  --port ({bind_port}). The callback URL will be unreachable.\n\
-                 \x20 Fix: set MCP_PUBLIC_URL=http://localhost:{bind_port} or run with --port {url_port}"
+                 \x20 Fix: set MCP_CALLBACK_URL=http://localhost:{bind_port} or run with --port {url_port}"
             );
         }
 
@@ -696,6 +701,10 @@ async fn startup_validate_entra(entra: &EntraConfig, bind_port: u16) {
     eprintln!(
         "[startup] ℹ Callback URL (must be registered in app registration): {}",
         entra.redirect_uri()
+    );
+    eprintln!(
+        "[startup] ℹ MCP OAuth metadata base URL (must be reachable by MCP clients): {}",
+        entra.url
     );
 }
 
@@ -1320,15 +1329,22 @@ async fn main() {
                     "[bill_analysis_mcp] ERROR: missing required env vars \
                      (ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET, MCP_PUBLIC_URL).\n\
                      Copy .env.example to .env and fill in the values, or pass --no-auth to \
-                     disable authentication."
+                     disable authentication.\n\
+                     Optional for containerized MCP clients: set MCP_CALLBACK_URL separately \
+                     (e.g. MCP_PUBLIC_URL=http://host.docker.internal:8091 and \
+                     MCP_CALLBACK_URL=http://localhost:8091)."
                 );
                 std::process::exit(1);
             }
         }
     };
 
-    // Resolve bind host/port: CLI flag > MCP_PUBLIC_URL > hardcoded defaults
-    let url_addr = entra.as_ref().and_then(|e| parse_bind_addr_from_url(&e.public_url));
+    // Resolve bind host/port: CLI flag > MCP_URL env var > hardcoded defaults.
+    // This keeps local bind behavior sane when MCP_URL points at
+    // `host.docker.internal` for container clients.
+    let mcp_url = std::env::var("MCP_URL").ok().filter(|s| !s.is_empty());
+    let url_addr = entra.as_ref().and_then(|e| parse_bind_addr_from_url(&e.url))
+        .or_else(|| mcp_url.as_ref().and_then(|u| parse_bind_addr_from_url(u)));
     let bind_host = args.host
         .unwrap_or_else(|| url_addr.as_ref().map(|(h, _)| h.clone()).unwrap_or_else(|| "127.0.0.1".to_string()));
     let bind_port = args.port
