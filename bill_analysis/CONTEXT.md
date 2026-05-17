@@ -38,6 +38,14 @@ A Rust CLI tool that parses **Azure "Detailed" cost export CSVs** (amortized/enr
 | **MCP tool** | A named function the LLM can invoke via MCP (e.g. `get_monthly_cost`) |
 | **BillCache** | Lazy in-memory cache mapping `YearMonth → Bills`; populated on first access, retained for the server lifetime |
 | **YearMonth** | A `(u32, u32)` year/month pair used as the cache key in `BillCache` |
+| **Entra** | Microsoft Entra ID (formerly Azure AD) — the identity provider used to authenticate users of the MCP server |
+| **App Registration** | The Entra application record that defines OAuth client credentials, redirect URIs, and App Role declarations for this MCP server |
+| **OAuth Proxy** | The role the MCP server plays: it exposes `/authorize`, `/callback`, and `/.well-known/oauth-authorization-server` so MCP clients can drive the Auth Code flow, then passes the resulting Entra JWT through to the caller |
+| **App Role** | A named permission declared on the App Registration and assigned to users/groups in Entra; appears as a `roles` claim in the JWT. The single defined role is `BillingViewer` — required to call any MCP tool. _Avoid_: Entra group, permission scope |
+| **CallerIdentity** | The authenticated user's identity extracted from the validated Entra JWT — at minimum UPN (`upn`/`preferred_username`) and OID (`oid`); used for audit logging and future authorization checks |
+| **PKCE State** | Short-lived in-memory record keyed by OAuth `state` parameter, correlating a `/authorize` request to its `/callback`; holds the PKCE `code_verifier` and the MCP client's `redirect_uri` |
+| **JwksCache** | In-memory cache of Entra's public signing keys, used to validate JWT signatures; refreshed automatically on key-not-found |
+| **`--no-auth` flag** | Explicit CLI opt-out that allows the MCP server to start without Entra config (for local dev/testing); absent this flag, missing Entra env vars cause the server to refuse to start |
 
 ## Architecture
 
