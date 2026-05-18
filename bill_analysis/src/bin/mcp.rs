@@ -92,8 +92,11 @@ impl EntraConfig {
     fn jwks_url(&self) -> String {
         format!("https://login.microsoftonline.com/{}/discovery/v2.0/keys", self.tenant_id)
     }
-    fn issuer(&self) -> String {
+    fn issuer_v2(&self) -> String {
         format!("https://login.microsoftonline.com/{}/v2.0", self.tenant_id)
+    }
+    fn issuer_v1(&self) -> String {
+        format!("https://sts.windows.net/{}/", self.tenant_id)
     }
     fn oidc_discovery_url(&self) -> String {
         format!(
@@ -230,12 +233,17 @@ async fn log_request(req: Request, next: Next) -> Response {
     let uri = req.uri().clone();
     let is_probe = method == axum::http::Method::GET && uri.path() == "/mcp";
     let start = Instant::now();
+    if !is_probe {
+        eprintln!(
+            "[http] {} {}",
+            method,
+            uri,
+        );
+    }
     let resp = next.run(req).await;
     if !is_probe {
         eprintln!(
-            "[http] {} {} → {} in {:.1}ms",
-            method,
-            uri,
+            "[http]   → {} in {:.1}ms",
             resp.status(),
             start.elapsed().as_secs_f64() * 1000.0
         );
@@ -253,16 +261,52 @@ async fn oauth_metadata_handler(State(state): State<AppState>) -> impl IntoRespo
         None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
     };
     let base = &entra.url;
+    let api_scope = format!("{}/.default", entra.client_id);
     let body = json!({
+        // issuer MUST equal the URL this metadata was fetched from (RFC 9207 §2).
+        // The MCP server is an OAuth proxy — its own base URL is the issuer,
+        // not Entra's. A mismatch causes compliant clients to abort before /authorize.
         "issuer": base,
         "authorization_endpoint": format!("{}/authorize", base),
         "token_endpoint": format!("{}/token", base),
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code"],
         "code_challenge_methods_supported": ["S256"],
+        "scopes_supported": ["openid", "profile", "email", api_scope],
+        // RFC 7591 dynamic client registration — required by MCP 2025 spec.
+        // Without this field compliant clients have no client_id and won't call /authorize.
+        "registration_endpoint": format!("{}/register", base),
     });
-    eprintln!("[oauth] authorization-server metadata: {body}");
+    eprintln!("  [oauth] authorization-server metadata: {body}");
     Json(body).into_response()
+}
+
+/// RFC 7591 — Dynamic Client Registration.
+/// MCP clients POST here to obtain a client_id before starting the auth flow.
+/// This is a stateless implementation: any valid registration request gets the
+/// server's own client_id echoed back (the Entra app registration is already
+/// configured with the correct redirect URIs and app roles).
+async fn register_handler(
+    State(state): State<AppState>,
+    body: axum::extract::Json<Value>,
+) -> Response {
+    let entra = match &state.entra {
+        Some(e) => e,
+        None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
+    };
+    let redirect_uris = body.get("redirect_uris").cloned().unwrap_or(json!([]));
+    eprintln!("  [oauth] /register client_name={:?} redirect_uris={redirect_uris}",
+        body.get("client_name").and_then(|v| v.as_str()).unwrap_or("unknown"));
+    // Return the pre-registered Entra app client_id. No secret needed for PKCE.
+    Json(json!({
+        "client_id": entra.client_id,
+        "client_id_issued_at": 0,
+        "redirect_uris": redirect_uris,
+        "grant_types": ["authorization_code"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none",
+    }))
+    .into_response()
 }
 
 /// RFC 9728 — OAuth 2.0 Protected Resource Metadata.
@@ -279,7 +323,7 @@ async fn oauth_protected_resource_handler(State(state): State<AppState>) -> impl
         "resource": format!("{}/mcp", base),
         "authorization_servers": [base],
     });
-    eprintln!("[oauth] protected-resource: {body}");
+    eprintln!("  [oauth] protected-resource: {body}");
     Json(body).into_response()
 }
 
@@ -299,7 +343,7 @@ async fn authorize_handler(
     State(state): State<AppState>,
     Query(params): Query<AuthorizeParams>,
 ) -> Response {
-    eprintln!("[oauth] /authorize called with client_id={:?}, redirect_uri={}", params.client_id, params.redirect_uri);
+    eprintln!("  [oauth] /authorize called with client_id={:?}, redirect_uri={}", params.client_id, params.redirect_uri);
     
     let entra = match &state.entra {
         Some(e) => e.clone(),
@@ -308,14 +352,19 @@ async fn authorize_handler(
 
     let method = params.code_challenge_method.as_deref().unwrap_or("S256");
     if method != "S256" {
-        eprintln!("[oauth] FAIL /authorize unsupported code_challenge_method={}", method);
+        eprintln!("  [oauth] FAIL /authorize unsupported code_challenge_method={}", method);
         return (StatusCode::BAD_REQUEST, "only S256 code_challenge_method supported")
             .into_response();
     }
 
     let server_state = random_string(32);
     let client_state = params.state.unwrap_or_default();
-    let scope = params.scope.as_deref().unwrap_or("openid profile email");
+    // Default scope must include the app's own API scope so Entra issues a token
+    // with aud=client_id and the roles claim (required for BillingViewer check).
+    let default_scope = format!("{}/.default openid profile email", entra.client_id);
+    let scope = params.scope
+        .filter(|s| !s.is_empty())
+        .unwrap_or(default_scope);
 
     {
         let mut store = state.pkce_store.write().await;
@@ -339,9 +388,9 @@ async fn authorize_handler(
         url_encode(&entra.client_id),
         url_encode(&entra.redirect_uri()),
         url_encode(&server_state),
-        url_encode(scope),
+        url_encode(&scope),
     );
-    eprintln!("[oauth] /authorize redirecting to Entra: {}", target);
+    eprintln!("  [oauth] /authorize redirecting to Entra: {}", target);
     Redirect::temporary(&target).into_response()
 }
 
@@ -364,7 +413,7 @@ async fn callback_handler(
 
     if let Some(err) = &params.error {
         let desc = params.error_description.as_deref().unwrap_or("");
-        eprintln!("[auth] Entra authorize error={err} description={desc}");
+        eprintln!("  [oauth] Entra authorize error={err} description={desc}");
         return (StatusCode::BAD_GATEWAY, format!("Entra error: {err}")).into_response();
     }
 
@@ -382,7 +431,7 @@ async fn callback_handler(
         match store.remove(&server_state) {
             Some(e) => e,
             None => {
-                eprintln!("[auth] FAIL callback unknown or expired state={server_state}");
+                eprintln!("  [oauth] FAIL callback unknown or expired state={server_state}");
                 return (StatusCode::BAD_REQUEST, "unknown or expired state").into_response();
             }
         }
@@ -406,12 +455,12 @@ async fn callback_handler(
         Ok(r) => match r.json().await {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("[auth] FAIL token exchange parse error: {e}");
+                eprintln!("  [oauth] FAIL token exchange parse error: {e}");
                 return (StatusCode::BAD_GATEWAY, "token exchange failed").into_response();
             }
         },
         Err(e) => {
-            eprintln!("[auth] FAIL token exchange request error: {e}");
+            eprintln!("  [oauth] FAIL token exchange request error: {e}");
             return (StatusCode::BAD_GATEWAY, "token exchange failed").into_response();
         }
     };
@@ -421,7 +470,7 @@ async fn callback_handler(
         None => {
             let err = token_json["error"].as_str().unwrap_or("unknown");
             let desc = token_json["error_description"].as_str().unwrap_or("");
-            eprintln!("[auth] FAIL token exchange entra_error={err} desc={desc}");
+            eprintln!("  [oauth] FAIL token exchange entra_error={err} desc={desc}");
             return (StatusCode::BAD_GATEWAY, "token exchange failed").into_response();
         }
     };
@@ -475,7 +524,7 @@ async fn token_handler(
         match codes.remove(&req.code) {
             Some(e) => e,
             None => {
-                eprintln!("[auth] FAIL token exchange unknown or expired code");
+                eprintln!("  [oauth] FAIL token exchange unknown or expired code");
                 return (
                     StatusCode::BAD_REQUEST,
                     Json(json!({"error":"invalid_grant","error_description":"unknown or expired code"})),
@@ -488,7 +537,7 @@ async fn token_handler(
     // Validate PKCE: SHA256(code_verifier) == code_challenge
     let computed = URL_SAFE_NO_PAD.encode(Sha256::digest(req.code_verifier.as_bytes()));
     if computed != entry.code_challenge {
-        eprintln!("[auth] FAIL PKCE verification failed");
+        eprintln!("  [oauth] FAIL PKCE verification failed");
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error":"invalid_grant","error_description":"PKCE verification failed"})),
@@ -559,7 +608,9 @@ async fn validate_jwt(
 
     let mut validation = Validation::new(Algorithm::RS256);
     validation.set_audience(&[&entra.client_id]);
-    validation.set_issuer(&[&entra.issuer()]);
+    // Accept both v2 (login.microsoftonline.com/.../v2.0) and v1 (sts.windows.net/.../)
+    // issuers — client_credentials and some app tokens return v1 tokens by default.
+    validation.set_issuer(&[&entra.issuer_v2(), &entra.issuer_v1()]);
 
     let token_data = jsonwebtoken::decode::<EntraClaims>(token, &decoding_key, &validation)
         .map_err(|e| format!("{e}"))?;
@@ -571,19 +622,16 @@ async fn validate_jwt(
     })
 }
 
-fn unauthorized_response(public_url: &str, description: &str) -> Response {
-    let resource_metadata =
-        format!("{public_url}/.well-known/oauth-protected-resource");
+fn unauthorized_response(public_url: &str, client_id: &str, description: &str) -> Response {
+    let resource_metadata = format!("{public_url}/.well-known/oauth-protected-resource");
+    let www_authenticate = format!(
+        "Bearer realm=\"{public_url}\", resource_metadata=\"{resource_metadata}\", scope=\"{client_id}/.default openid profile email\""
+    );
+    eprintln!("  [oauth] 401 response with WWW-Authenticate: {www_authenticate}");
     (
         StatusCode::UNAUTHORIZED,
         [
-            (
-                "WWW-Authenticate",
-                format!(
-                    "Bearer realm=\"{public_url}\", \
-                     resource_metadata=\"{resource_metadata}\""
-                ),
-            ),
+            ("WWW-Authenticate", www_authenticate),
             ("Content-Type", "text/plain".to_string()),
         ],
         description.to_string(),
@@ -610,15 +658,15 @@ async fn require_auth(
     let token = if let Some(t) = auth_header.strip_prefix("Bearer ") {
         t.to_string()
     } else {
-        eprintln!("[auth] FAIL missing Authorization header");
-        return unauthorized_response(&entra.url, "missing Authorization header");
+        eprintln!("  [oauth] FAIL missing Authorization header");
+        return unauthorized_response(&entra.url, &entra.client_id, "missing Authorization header");
     };
 
     match validate_jwt(&token, &entra, &state.jwks_cache).await {
         Ok(caller) => {
             if !caller.roles.contains(&"BillingViewer".to_string()) {
                 eprintln!(
-                    "[auth] FAIL missing_role oid={} upn={} roles={:?}",
+                    "  [oauth] FAIL missing_role oid={} upn={} roles={:?}",
                     caller.oid, caller.upn, caller.roles
                 );
                 return (
@@ -628,14 +676,14 @@ async fn require_auth(
                     .into_response();
             }
             eprintln!(
-                "[auth] OK oid={} upn={} roles={:?}",
+                "  [oauth] OK oid={} upn={} roles={:?}",
                 caller.oid, caller.upn, caller.roles
             );
             next.run(req).await
         }
         Err(reason) => {
-            eprintln!("[auth] FAIL token validation: {reason}");
-            unauthorized_response(&entra.url, &format!("invalid token: {reason}"))
+            eprintln!("  [oauth] FAIL token validation: {reason}");
+            unauthorized_response(&entra.url, &entra.client_id, &format!("invalid token: {reason}"))
         }
     }
 }
@@ -1382,6 +1430,7 @@ async fn main() {
         .route("/authorize", get(authorize_handler))
         .route("/callback", get(callback_handler))
         .route("/token", post(token_handler))
+        .route("/register", post(register_handler))
         .with_state(state)
         .layer(middleware::from_fn(log_request));
 
