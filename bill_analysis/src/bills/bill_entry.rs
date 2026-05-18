@@ -129,12 +129,13 @@ pub fn extract_date_from_file_name(file_path: &str) -> String {
     // Folder names like "2026-04_G156087700" are set by the user and reflect the real billing
     // month, whereas the CSV file name may contain a different period code (e.g. "202605").
     if let Some(parent) = std::path::Path::new(file_path).parent()
-        && let Some(dir_name) = parent.file_name().and_then(|n| n.to_str()) {
-            let re_folder = Regex::new(r"^(\d{4}-\d{2}|\d{6})").unwrap();
-            if let Some(caps) = re_folder.captures(dir_name) {
-                return caps[1].to_string();
-            }
+        && let Some(dir_name) = parent.file_name().and_then(|n| n.to_str())
+    {
+        let re_folder = Regex::new(r"^(\d{4}-\d{2}|\d{6})").unwrap();
+        if let Some(caps) = re_folder.captures(dir_name) {
+            return caps[1].to_string();
         }
+    }
     // Fall back: extract _YYYYMM_ from the file name itself
     let re = Regex::new(r"_(\d{6})_").unwrap();
     if let Some(caps) = re.captures(file_path) {
@@ -188,7 +189,9 @@ mod tests {
     use crate::money::Nzd;
     use std::path::PathBuf;
 
-    static FILTER_OPTS: FilterOpts = FilterOpts { case_sensitive: true };
+    static FILTER_OPTS: FilterOpts = FilterOpts {
+        case_sensitive: true,
+    };
 
     #[test]
     fn test_cost_by_resource_name() {

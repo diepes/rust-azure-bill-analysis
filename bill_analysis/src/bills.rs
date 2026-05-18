@@ -132,7 +132,9 @@ mod tests {
     use crate::money::Nzd;
     use std::path::PathBuf;
 
-    static FILTER_OPTS: FilterOpts = FilterOpts { case_sensitive: true };
+    static FILTER_OPTS: FilterOpts = FilterOpts {
+        case_sensitive: true,
+    };
 
     #[test]
     fn test_cost_by_resource_name() {

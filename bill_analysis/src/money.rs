@@ -66,25 +66,37 @@ macro_rules! impl_money_ops {
     ($T:ident) => {
         impl Add for $T {
             type Output = $T;
-            fn add(self, rhs: $T) -> $T { $T(self.0 + rhs.0) }
+            fn add(self, rhs: $T) -> $T {
+                $T(self.0 + rhs.0)
+            }
         }
         impl AddAssign for $T {
-            fn add_assign(&mut self, rhs: $T) { self.0 += rhs.0; }
+            fn add_assign(&mut self, rhs: $T) {
+                self.0 += rhs.0;
+            }
         }
         impl Sub for $T {
             type Output = $T;
-            fn sub(self, rhs: $T) -> $T { $T(self.0 - rhs.0) }
+            fn sub(self, rhs: $T) -> $T {
+                $T(self.0 - rhs.0)
+            }
         }
         impl SubAssign for $T {
-            fn sub_assign(&mut self, rhs: $T) { self.0 -= rhs.0; }
+            fn sub_assign(&mut self, rhs: $T) {
+                self.0 -= rhs.0;
+            }
         }
         impl Neg for $T {
             type Output = $T;
-            fn neg(self) -> $T { $T(-self.0) }
+            fn neg(self) -> $T {
+                $T(-self.0)
+            }
         }
         impl Mul<f64> for $T {
             type Output = $T;
-            fn mul(self, rhs: f64) -> $T { $T(self.0 * rhs) }
+            fn mul(self, rhs: f64) -> $T {
+                $T(self.0 * rhs)
+            }
         }
         impl std::iter::Sum for $T {
             fn sum<I: Iterator<Item = $T>>(iter: I) -> $T {

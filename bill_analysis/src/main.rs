@@ -15,7 +15,9 @@ fn main() {
     } else {
         false
     };
-    let filter_opts = FilterOpts { case_sensitive: app.global_opts.case_sensitive };
+    let filter_opts = FilterOpts {
+        case_sensitive: app.global_opts.case_sensitive,
+    };
     let display_opts = DisplayOpts {
         cost_min_display: app.global_opts.cost_min_display,
         tag_list: app.global_opts.tag_list,
@@ -24,8 +26,9 @@ fn main() {
     match app.command {
         Some(Commands::BillSummary(args)) => {
             println!("Running BillSummary command {:?}", args);
-            let bill_path = app.global_opts.bill_path.clone()
-                .unwrap_or_else(|| std::path::PathBuf::from(bill_analysis::find_files::last_month_shorthand()));
+            let bill_path = app.global_opts.bill_path.clone().unwrap_or_else(|| {
+                std::path::PathBuf::from(bill_analysis::find_files::last_month_shorthand())
+            });
             let (mut latest_bill, _file_name) =
                 bill_analysis::load_bill(&bill_path, &filter_opts, debug);
             latest_bill.summary(&bill_path, &filter_opts, debug);
@@ -33,10 +36,9 @@ fn main() {
         Some(Commands::DiskCsvSavings(args)) => {
             bill_analysis::calc_disks_cost(
                 args.diskfile,
-                &app.global_opts
-                    .bill_path
-                    .clone()
-                    .unwrap_or_else(|| std::path::PathBuf::from(bill_analysis::find_files::last_month_shorthand())),
+                &app.global_opts.bill_path.clone().unwrap_or_else(|| {
+                    std::path::PathBuf::from(bill_analysis::find_files::last_month_shorthand())
+                }),
                 &filter_opts,
                 debug,
             );
@@ -47,20 +49,16 @@ fn main() {
                 println!("No command specified #2 {:?}", app.name_regex);
             }
             // Positional args take precedence over named flags
-            let bill_path = app.bill
-                .or(app.global_opts.bill_path)
-                .unwrap_or_else(|| {
-                    let default = bill_analysis::find_files::last_month_shorthand();
-                    println!("No bill specified, defaulting to last month: {default}");
-                    std::path::PathBuf::from(default)
-                });
+            let bill_path = app.bill.or(app.global_opts.bill_path).unwrap_or_else(|| {
+                let default = bill_analysis::find_files::last_month_shorthand();
+                println!("No bill specified, defaulting to last month: {default}");
+                std::path::PathBuf::from(default)
+            });
             let prev_path = app.bill_prev.or(app.global_opts.bill_prev_subtract_path);
-            let (latest_bill, file_name) = bill_analysis::load_bill(&bill_path, &filter_opts, debug);
+            let (latest_bill, file_name) =
+                bill_analysis::load_bill(&bill_path, &filter_opts, debug);
             println!("Loaded latest bill from '{:?}'", file_name);
-            bill_analysis::display_total_cost_summary(
-                &latest_bill,
-                "Latest bill",
-            );
+            bill_analysis::display_total_cost_summary(&latest_bill, "Latest bill");
             // If set read previous bill and subtract it from latest bill
             let previous_bill: Option<bills::Bills> = if let Some(ref bill_prev_subtract_path) =
                 prev_path
@@ -74,10 +72,7 @@ fn main() {
                     "Removing previous bill from latest bill '{:?}' (Filter matching resource ID's)",
                     prev_file_name
                 );
-                bill_analysis::display_total_cost_summary(
-                    &prev_bill,
-                    "Previous bill",
-                );
+                bill_analysis::display_total_cost_summary(&prev_bill, "Previous bill");
                 Some(prev_bill)
             } else {
                 None

@@ -73,7 +73,8 @@ impl BillFilter {
 
         let ci = !filter_opts.case_sensitive;
 
-        let build_re_with_case = |pattern: &str| RegexBuilder::new(pattern).case_insensitive(ci).build();
+        let build_re_with_case =
+            |pattern: &str| RegexBuilder::new(pattern).case_insensitive(ci).build();
 
         Ok(BillFilter {
             re_name: build_re_with_case(&name)?,

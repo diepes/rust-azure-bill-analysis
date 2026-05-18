@@ -23,7 +23,12 @@ use cmd_parse::FilterOpts;
 // });
 
 // function calc_subscription_cost
-pub fn calc_subscription_cost(subscription: &str, file_or_folder: &Path, filter_opts: &FilterOpts, debug: bool) {
+pub fn calc_subscription_cost(
+    subscription: &str,
+    file_or_folder: &Path,
+    filter_opts: &FilterOpts,
+    debug: bool,
+) {
     println!("Calculating Azure subscription:\"{subscription}\" cost from csv export.\n");
     let (latest_bill, bill_file_name) = load_latest_bill(file_or_folder, filter_opts, debug);
     println!();
@@ -37,17 +42,17 @@ pub fn calc_subscription_cost(subscription: &str, file_or_folder: &Path, filter_
     println!("Total cost {total_cost} subs:{:?}", subs);
 }
 
-fn load_latest_bill(file_or_folder: &Path, filter_opts: &FilterOpts, debug: bool) -> (Bills, String) {
+fn load_latest_bill(
+    file_or_folder: &Path,
+    filter_opts: &FilterOpts,
+    debug: bool,
+) -> (Bills, String) {
     let resolved = find_files::resolve_date_shorthand(file_or_folder);
     let file_or_folder = resolved.as_path();
     let file_bill: PathBuf = if file_or_folder.is_file() {
         file_or_folder.to_path_buf()
     } else {
-        let (path, files) = find_files::in_folder(
-            file_or_folder,
-            r".*Detail.*\.csv$",
-            debug,
-        );
+        let (path, files) = find_files::in_folder(file_or_folder, r".*Detail.*\.csv$", debug);
         path.join(files.last().expect("No files found"))
     };
     println!("Loading bill from '{:?}'", file_bill);
@@ -62,7 +67,12 @@ fn load_latest_bill(file_or_folder: &Path, filter_opts: &FilterOpts, debug: bool
     )
 }
 
-pub fn calc_disks_cost(file_disk: PathBuf, file_or_folder: &Path, filter_opts: &FilterOpts, debug: bool) {
+pub fn calc_disks_cost(
+    file_disk: PathBuf,
+    file_or_folder: &Path,
+    filter_opts: &FilterOpts,
+    debug: bool,
+) {
     println!("Calculating Azure disk cost from csv export.\n");
     let disks = az_disk::AzDisks::parse(&file_disk)
         .unwrap_or_else(|_| panic!("Error parsing the file '{:?}'", file_disk));

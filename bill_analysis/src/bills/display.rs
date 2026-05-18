@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use colored::Colorize;
 
-use crate::bills::bill_filter::BillFilter;
 use crate::bills::Bills;
+use crate::bills::bill_filter::BillFilter;
 // use super::bills_sum_data;
 use crate::bills::bills_sum_data::{CostSource, SummaryData};
 use crate::bills::cost_type_enum::CostType;
@@ -13,7 +13,12 @@ use crate::f64_to_currency;
 // ── Display data types ────────────────────────────────────────────────────────
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub enum RowColour { Red, Green, Blue, Cyan }
+pub enum RowColour {
+    Red,
+    Green,
+    Blue,
+    Cyan,
+}
 
 #[derive(Debug)]
 pub struct PreparedRow {
@@ -48,11 +53,19 @@ pub(crate) fn prepare_rows(
         .map(|(cost, name, source)| {
             let colour = match source {
                 CostSource::Original => {
-                    if cost < 0.0 { RowColour::Cyan } else { RowColour::Red }
+                    if cost < 0.0 {
+                        RowColour::Cyan
+                    } else {
+                        RowColour::Red
+                    }
                 }
                 CostSource::Secondary => RowColour::Green,
                 CostSource::Combined => {
-                    if cost < 0.0 { RowColour::Green } else { RowColour::Blue }
+                    if cost < 0.0 {
+                        RowColour::Green
+                    } else {
+                        RowColour::Blue
+                    }
                 }
             };
             let visible =
@@ -60,16 +73,30 @@ pub(crate) fn prepare_rows(
             if !visible {
                 skipped_count += 1;
             }
-            PreparedRow { cost, name: name.to_string(), source, colour, visible }
+            PreparedRow {
+                cost,
+                name: name.to_string(),
+                source,
+                colour,
+                visible,
+            }
         })
         .collect();
-    PreparedSummary { rows, total, total_usd, skipped_count }
+    PreparedSummary {
+        rows,
+        total,
+        total_usd,
+        skipped_count,
+    }
 }
 
 /// Returns the legend line for a summary block (pure, no I/O).
 pub(crate) fn legend_text(is_comparison: bool) -> String {
     if !is_comparison {
-        format!("Legend: {cyan}", cyan = "Cyan=Credit/Refund(negative)".cyan())
+        format!(
+            "Legend: {cyan}",
+            cyan = "Cyan=Credit/Refund(negative)".cyan()
+        )
     } else {
         format!(
             "Legend: cost colour's {red} {green} {blue} {cyan}",
@@ -93,8 +120,14 @@ pub fn display_cost_by_filter(
     println!();
     println!(
         "Filter Azure name:{}, rg:{}, sub:{}, cat:{}, tag_filter:{}, tag_summarise:{}, location:{}, reservation:{}, invoice_section:{}.\n",
-        filter.name, filter.resource_group, filter.subscription, filter.meter_category,
-        filter.tag_filter, filter.tag_summarise, filter.location, filter.reservation,
+        filter.name,
+        filter.resource_group,
+        filter.subscription,
+        filter.meter_category,
+        filter.tag_filter,
+        filter.tag_summarise,
+        filter.location,
+        filter.reservation,
         filter.invoice_section,
     );
     // now that we have latest_bill and disks, lookup disk cost in latest_bill
@@ -130,29 +163,74 @@ pub fn display_cost_by_filter(
     }
 
     // print Region bill details
-    println!("## Location bill details {} '{}'", filter.location, display_date);
-    print_summary(&bill_summary, &cur, CostType::Region, display_opts, is_comparison);
+    println!(
+        "## Location bill details {} '{}'",
+        filter.location, display_date
+    );
+    print_summary(
+        &bill_summary,
+        &cur,
+        CostType::Region,
+        display_opts,
+        is_comparison,
+    );
     println!();
 
     // print Invoice Section bill details (only when filter specified)
     if !filter.invoice_section.is_empty() {
-        println!("## Invoice Section bill details '{}' '{}'", filter.invoice_section, display_date);
-        print_summary(&bill_summary, &cur, CostType::InvoiceSection, display_opts, is_comparison);
+        println!(
+            "## Invoice Section bill details '{}' '{}'",
+            filter.invoice_section, display_date
+        );
+        print_summary(
+            &bill_summary,
+            &cur,
+            CostType::InvoiceSection,
+            display_opts,
+            is_comparison,
+        );
         println!();
     }
 
     // print Subscription bill details
-    println!("## Subscription bill details {} '{}'", filter.subscription, display_date);
-    print_summary(&bill_summary, &cur, CostType::Subscription, display_opts, is_comparison);
+    println!(
+        "## Subscription bill details {} '{}'",
+        filter.subscription, display_date
+    );
+    print_summary(
+        &bill_summary,
+        &cur,
+        CostType::Subscription,
+        display_opts,
+        is_comparison,
+    );
     println!();
     // print ResourceGroup bill details
-    println!("## ResourceGroup bill details {} '{}'", filter.resource_group, display_date);
-    print_summary(&bill_summary, &cur, CostType::ResourceGroup, display_opts, is_comparison);
+    println!(
+        "## ResourceGroup bill details {} '{}'",
+        filter.resource_group, display_date
+    );
+    print_summary(
+        &bill_summary,
+        &cur,
+        CostType::ResourceGroup,
+        display_opts,
+        is_comparison,
+    );
     println!();
     // print Resource bill details
     if !filter.name.is_empty() {
-        println!("## ResourceName bill details {} '{}'", filter.resource_group, display_date);
-        print_summary(&bill_summary, &cur, CostType::ResourceName, display_opts, is_comparison);
+        println!(
+            "## ResourceName bill details {} '{}'",
+            filter.resource_group, display_date
+        );
+        print_summary(
+            &bill_summary,
+            &cur,
+            CostType::ResourceName,
+            display_opts,
+            is_comparison,
+        );
     }
 
     // print MeterSubCategory bill details
@@ -161,20 +239,41 @@ pub fn display_cost_by_filter(
             "## MeterSubCategory bill details {} '{}'",
             filter.resource_group, display_date
         );
-        print_summary(&bill_summary, &cur, CostType::MeterSubCategory, display_opts, is_comparison);
+        print_summary(
+            &bill_summary,
+            &cur,
+            CostType::MeterSubCategory,
+            display_opts,
+            is_comparison,
+        );
         println!()
     }
     // print MeterCategory bill details
     if !filter.meter_category.is_empty() {
-        println!("## MeterCategory bill details {} '{}'", filter.resource_group, display_date);
-        print_summary(&bill_summary, &cur, CostType::MeterCategory, display_opts, is_comparison);
+        println!(
+            "## MeterCategory bill details {} '{}'",
+            filter.resource_group, display_date
+        );
+        print_summary(
+            &bill_summary,
+            &cur,
+            CostType::MeterCategory,
+            display_opts,
+            is_comparison,
+        );
         println!()
     }
 
     // print Tag bill details
     if !filter.tag_summarise.is_empty() {
         println!("## Tag details {} '{}'", filter.tag_summarise, display_date);
-        print_summary(&bill_summary, &cur, CostType::Tag, display_opts, is_comparison);
+        print_summary(
+            &bill_summary,
+            &cur,
+            CostType::Tag,
+            display_opts,
+            is_comparison,
+        );
         println!();
     }
 
@@ -197,7 +296,13 @@ pub fn display_cost_by_filter(
 
     // print Reservation bill details
     if !filter.reservation.is_empty() {
-        print_summary(&bill_summary, &cur, CostType::Reservation, display_opts, is_comparison);
+        print_summary(
+            &bill_summary,
+            &cur,
+            CostType::Reservation,
+            display_opts,
+            is_comparison,
+        );
         println!();
 
         println!();
@@ -217,7 +322,8 @@ pub fn display_cost_by_filter(
                     // get reservation names convert to vec and sort them
                     let mut rn = reservation
                         .reservation_names
-                        .iter().copied()
+                        .iter()
+                        .copied()
                         .collect::<Vec<&str>>();
                     rn.sort();
                     let rn = rn.join(", ").blue();
@@ -308,8 +414,7 @@ fn sort_calc_total<'a>(
             }
         })
         .collect();
-    bill_details_sorted
-        .sort_by(|(a, _na, _srca), (b, _nb, _srcb)| a.partial_cmp(b).unwrap());
+    bill_details_sorted.sort_by(|(a, _na, _srca), (b, _nb, _srcb)| a.partial_cmp(b).unwrap());
     (total, total_usd, cnt, bill_details_sorted)
 }
 
@@ -327,10 +432,10 @@ fn print_summary(
         let currency = f64_to_currency(row.cost, 2);
         let part1 = format!("{cur} {currency:>11}");
         let color_cost = match row.colour {
-            RowColour::Red   => part1.red().to_string(),
+            RowColour::Red => part1.red().to_string(),
             RowColour::Green => part1.green().to_string(),
-            RowColour::Blue  => part1.blue().to_string(),
-            RowColour::Cyan  => part1.cyan().to_string(),
+            RowColour::Blue => part1.blue().to_string(),
+            RowColour::Cyan => part1.cyan().to_string(),
         };
         println!(
             " bill_details: '{color_cost}' :: {t_short}:'{name}'",
@@ -351,7 +456,10 @@ fn print_summary(
     let total_count = prepared.rows.len();
     if total_count > 0 {
         let total_colored = if prepared.total < 0.0 {
-            f64_to_currency(prepared.total, 2).green().bold().to_string()
+            f64_to_currency(prepared.total, 2)
+                .green()
+                .bold()
+                .to_string()
         } else {
             f64_to_currency(prepared.total, 2).red().bold().to_string()
         };
@@ -379,7 +487,12 @@ mod tests {
         for (name, ct, cost, source) in entries {
             s.per_type.insert(
                 (ct.clone(), name.to_string()),
-                CostTotal { cost: Nzd(*cost), cost_usd: Usd(*cost), cost_unreserved: 0.0, source: *source },
+                CostTotal {
+                    cost: Nzd(*cost),
+                    cost_usd: Usd(*cost),
+                    cost_unreserved: 0.0,
+                    source: *source,
+                },
             );
         }
         s
@@ -404,18 +517,47 @@ mod tests {
     #[test]
     fn test_prepare_rows_colours() {
         let summary = make_summary(&[
-            ("new-item",    CostType::ResourceGroup,  50.0, CostSource::Original),
-            ("credit",      CostType::ResourceGroup, -10.0, CostSource::Original),
-            ("gone-item",   CostType::ResourceGroup,  30.0, CostSource::Secondary),
-            ("increased",   CostType::ResourceGroup,  20.0, CostSource::Combined),
-            ("decreased",   CostType::ResourceGroup, -15.0, CostSource::Combined),
+            (
+                "new-item",
+                CostType::ResourceGroup,
+                50.0,
+                CostSource::Original,
+            ),
+            (
+                "credit",
+                CostType::ResourceGroup,
+                -10.0,
+                CostSource::Original,
+            ),
+            (
+                "gone-item",
+                CostType::ResourceGroup,
+                30.0,
+                CostSource::Secondary,
+            ),
+            (
+                "increased",
+                CostType::ResourceGroup,
+                20.0,
+                CostSource::Combined,
+            ),
+            (
+                "decreased",
+                CostType::ResourceGroup,
+                -15.0,
+                CostSource::Combined,
+            ),
         ]);
-        let opts = DisplayOpts { cost_min_display: 0.0, tag_list: false, debug: false };
+        let opts = DisplayOpts {
+            cost_min_display: 0.0,
+            tag_list: false,
+            debug: false,
+        };
         let prepared = prepare_rows(&summary, CostType::ResourceGroup, &opts);
 
         let find = |name: &str| prepared.rows.iter().find(|r| r.name == name).unwrap();
-        assert_eq!(find("new-item").colour,  RowColour::Red);
-        assert_eq!(find("credit").colour,    RowColour::Cyan);
+        assert_eq!(find("new-item").colour, RowColour::Red);
+        assert_eq!(find("credit").colour, RowColour::Cyan);
         assert_eq!(find("gone-item").colour, RowColour::Green);
         assert_eq!(find("increased").colour, RowColour::Blue);
         assert_eq!(find("decreased").colour, RowColour::Green);
@@ -424,13 +566,17 @@ mod tests {
     #[test]
     fn test_prepare_rows_visibility_threshold() {
         let summary = make_summary(&[
-            ("big",   CostType::ResourceGroup, 100.0, CostSource::Original),
-            ("small", CostType::ResourceGroup,   5.0, CostSource::Original),
+            ("big", CostType::ResourceGroup, 100.0, CostSource::Original),
+            ("small", CostType::ResourceGroup, 5.0, CostSource::Original),
         ]);
-        let opts = DisplayOpts { cost_min_display: 10.0, tag_list: false, debug: false };
+        let opts = DisplayOpts {
+            cost_min_display: 10.0,
+            tag_list: false,
+            debug: false,
+        };
         let prepared = prepare_rows(&summary, CostType::ResourceGroup, &opts);
 
-        let big   = prepared.rows.iter().find(|r| r.name == "big").unwrap();
+        let big = prepared.rows.iter().find(|r| r.name == "big").unwrap();
         let small = prepared.rows.iter().find(|r| r.name == "small").unwrap();
         assert!(big.visible);
         assert!(!small.visible);

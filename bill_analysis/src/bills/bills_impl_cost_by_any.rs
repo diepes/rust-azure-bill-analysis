@@ -1,5 +1,5 @@
-use crate::bills::bill_filter::BillFilter;
 use crate::bills::Bills;
+use crate::bills::bill_filter::BillFilter;
 
 use crate::bills::cost_type_enum::CostType;
 // use crate::bills::ReservationInfo;
@@ -14,10 +14,7 @@ impl Bills {
     // returns total_filtered_cost,
     //         set of filtered resource groups,
     //     and HashMap of filtered cost per category(each category total - total filtered cost)
-    pub fn cost_by_any_summary(
-        &self,
-        filter: &BillFilter,
-    ) -> SummaryData<'_> {
+    pub fn cost_by_any_summary(&self, filter: &BillFilter) -> SummaryData<'_> {
         // collect set of resource groups in set rgs
         let mut summary_data = SummaryData::default();
         // bill_details record cost per filter category e.g. name_regex, rg_regex, subs_regex, meter_category
@@ -260,7 +257,9 @@ mod tests {
 
     // use super::*;
 
-    static FILTER_OPTS: FilterOpts = FilterOpts { case_sensitive: true };
+    static FILTER_OPTS: FilterOpts = FilterOpts {
+        case_sensitive: true,
+    };
 
     #[test]
     fn test_cost_by_resource_name() {
@@ -322,19 +321,36 @@ mod tests {
         let mut bills = crate::bills::Bills::default();
         bills.parse_csv(&path, &FILTER_OPTS).expect("parse failed");
 
-        let filter = BillFilter::new(None, None, None, None, None, None, None, None, None, &FILTER_OPTS)
-            .expect("valid test filter");
+        let filter = BillFilter::new(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &FILTER_OPTS,
+        )
+        .expect("valid test filter");
         let summary = bills.cost_by_any_summary(&filter);
 
         // Both rows have MeterCategory=Compute → aggregate across both
         let mc_key = (CostType::MeterCategory, "Compute".to_string());
-        let mc = summary.per_type.get(&mc_key).expect("MeterCategory Compute missing");
+        let mc = summary
+            .per_type
+            .get(&mc_key)
+            .expect("MeterCategory Compute missing");
         assert_eq!(mc.cost, Nzd(150.0), "MeterCategory NZD total");
         assert_eq!(mc.cost_usd, Usd(90.0), "MeterCategory USD total");
 
         // Individual ResourceGroup entries
         let rg1_key = (CostType::ResourceGroup, "rg-delta-test".to_string());
-        let rg1 = summary.per_type.get(&rg1_key).expect("rg-delta-test missing");
+        let rg1 = summary
+            .per_type
+            .get(&rg1_key)
+            .expect("rg-delta-test missing");
         assert_eq!(rg1.cost, Nzd(100.0), "rg-delta-test NZD");
         assert_eq!(rg1.cost_usd, Usd(60.0), "rg-delta-test USD");
 
@@ -344,8 +360,16 @@ mod tests {
         assert_eq!(rg2.cost_usd, Usd(30.0), "rg-new-only USD");
 
         // filtered_cost_total must equal sum of all rows
-        assert_eq!(summary.filtered_cost_total, Nzd(150.0), "filtered NZD total");
-        assert_eq!(summary.filtered_cost_total_usd, Usd(90.0), "filtered USD total");
+        assert_eq!(
+            summary.filtered_cost_total,
+            Nzd(150.0),
+            "filtered NZD total"
+        );
+        assert_eq!(
+            summary.filtered_cost_total_usd,
+            Usd(90.0),
+            "filtered USD total"
+        );
     }
 
     /// Verify that the rg_regex filter includes matching rows and excludes non-matching rows.
@@ -356,13 +380,27 @@ mod tests {
         let mut bills = crate::bills::Bills::default();
         bills.parse_csv(&path, &FILTER_OPTS).expect("parse failed");
 
-        let filter = BillFilter::new(None, Some("rg-delta-test".to_string()), None, None, None, None, None, None, None, &FILTER_OPTS)
-            .expect("valid test filter");
+        let filter = BillFilter::new(
+            None,
+            Some("rg-delta-test".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &FILTER_OPTS,
+        )
+        .expect("valid test filter");
         let summary = bills.cost_by_any_summary(&filter);
 
         // Matching RG present with full row cost
         let rg_key = (CostType::ResourceGroup, "rg-delta-test".to_string());
-        let rg = summary.per_type.get(&rg_key).expect("rg-delta-test missing after filter");
+        let rg = summary
+            .per_type
+            .get(&rg_key)
+            .expect("rg-delta-test missing after filter");
         assert_eq!(rg.cost, Nzd(100.0), "filtered rg NZD");
         assert_eq!(rg.cost_usd, Usd(60.0), "filtered rg USD");
 
@@ -374,8 +412,16 @@ mod tests {
         );
 
         // Totals reflect filtered row only
-        assert_eq!(summary.filtered_cost_total, Nzd(100.0), "filtered NZD total");
-        assert_eq!(summary.filtered_cost_total_usd, Usd(60.0), "filtered USD total");
+        assert_eq!(
+            summary.filtered_cost_total,
+            Nzd(100.0),
+            "filtered NZD total"
+        );
+        assert_eq!(
+            summary.filtered_cost_total_usd,
+            Usd(60.0),
+            "filtered USD total"
+        );
     }
 
     /// Invariant: sum of all (ResourceGroup, *) values in `per_type` must equal
@@ -386,8 +432,19 @@ mod tests {
         let mut bills = crate::bills::Bills::default();
         bills.parse_csv(&path, &FILTER_OPTS).expect("parse failed");
 
-        let filter = BillFilter::new(None, None, None, None, None, None, None, None, None, &FILTER_OPTS)
-            .expect("valid test filter");
+        let filter = BillFilter::new(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &FILTER_OPTS,
+        )
+        .expect("valid test filter");
         let summary = bills.cost_by_any_summary(&filter);
 
         let (rg_nzd_sum, rg_usd_sum) = summary
@@ -398,8 +455,14 @@ mod tests {
                 (n + v.cost, u + v.cost_usd)
             });
 
-        assert_eq!(rg_nzd_sum, summary.filtered_cost_total, "RG NZD sum == filtered total");
-        assert_eq!(rg_usd_sum, summary.filtered_cost_total_usd, "RG USD sum == filtered total USD");
+        assert_eq!(
+            rg_nzd_sum, summary.filtered_cost_total,
+            "RG NZD sum == filtered total"
+        );
+        assert_eq!(
+            rg_usd_sum, summary.filtered_cost_total_usd,
+            "RG USD sum == filtered total USD"
+        );
     }
 
     /// Verify that when two bills are compared (latest − previous) the NZD and USD
@@ -422,8 +485,19 @@ mod tests {
             .parse_csv(&prev_path, &FILTER_OPTS)
             .expect("prev CSV parse failed");
 
-        let filter = BillFilter::new(None, None, None, None, None, None, None, None, None, &FILTER_OPTS)
-            .expect("valid test filter");
+        let filter = BillFilter::new(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &FILTER_OPTS,
+        )
+        .expect("valid test filter");
         let latest_summary = latest_bills.cost_by_any_summary(&filter);
         let prev_summary = prev_bills.cost_by_any_summary(&filter);
 

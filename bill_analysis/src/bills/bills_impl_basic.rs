@@ -77,14 +77,14 @@ impl Bills {
     }
 
     pub fn total_no_reservation(&self) -> Usd {
-        self.bills
-            .iter()
-            .fold(Usd::default(), |acc, bill| acc + Usd(bill.unit_price * bill.quantity))
+        self.bills.iter().fold(Usd::default(), |acc, bill| {
+            acc + Usd(bill.unit_price * bill.quantity)
+        })
     }
     pub fn total_effective(&self) -> Usd {
-        self.bills
-            .iter()
-            .fold(Usd::default(), |acc, bill| acc + Usd(bill.effective_price * bill.quantity))
+        self.bills.iter().fold(Usd::default(), |acc, bill| {
+            acc + Usd(bill.effective_price * bill.quantity)
+        })
     }
     // Function to calculte the total savings
     // https://learn.microsoft.com/en-us/azure/cost-management-billing/reservations/calculate-ea-reservations-savings

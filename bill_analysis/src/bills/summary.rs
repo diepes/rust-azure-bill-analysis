@@ -8,7 +8,7 @@ use std::path::Path;
 pub struct Summary {
     pub total_cost: Nzd,
     pub total_cost_usd: Usd,
-    pub exchange_rate: f64,       // pricing currency (USD) → billing currency (NZD)
+    pub exchange_rate: f64, // pricing currency (USD) → billing currency (NZD)
     pub total_no_reservation: Usd,
     pub total_effective: Usd,
     pub total_savings_used: Usd,
@@ -37,7 +37,7 @@ impl Bills {
                 len = self.len(),
             );
             //println!("{:?}", bills[0]);
-        let no_res = self.total_no_reservation();
+            let no_res = self.total_no_reservation();
             let effective = self.total_effective();
             let savings = no_res - effective;
             let save_percent = if no_res.amount() != 0.0 {
@@ -51,9 +51,15 @@ impl Bills {
             );
             print!("Total Used Savings {}", self.total_used_savings());
             let meter_category = "Virtual Machines";
-            print!("Savings '{meter_category}' {}", self.savings(meter_category));
+            print!(
+                "Savings '{meter_category}' {}",
+                self.savings(meter_category)
+            );
             let meter_category = "Azure App Service";
-            print!("Savings '{meter_category}' {}", self.savings(meter_category));
+            print!(
+                "Savings '{meter_category}' {}",
+                self.savings(meter_category)
+            );
             println!();
         }
     }

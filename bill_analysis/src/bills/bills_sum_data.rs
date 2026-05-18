@@ -95,4 +95,3 @@ impl<'a> SummaryData<'a> {
         self.details.extend(prev.details.iter().cloned());
     }
 }
-
