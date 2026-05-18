@@ -142,6 +142,62 @@ tests/
 └── azure_test_disks_02.txt   5-row AzDisk newline-delimited sample
 ```
 
+## MCP OAuth Setup & Troubleshooting
+
+### How the OAuth proxy works
+
+The MCP server acts as its own OAuth Authorization Server (AS), proxying behind Microsoft Entra ID:
+
+```
+MCP client → /authorize (MCP server) → Entra /authorize → user login
+            ← /callback (Entra code)  ← browser redirect
+MCP client → /token (MCP server)     → validates PKCE, returns Entra access token
+MCP client → /mcp (Bearer token)     → validate_jwt + BillingViewer role check
+```
+
+### MCP 2025 spec requirements (all must be met)
+
+1. **`issuer` must equal the fetch URL** (RFC 9207 §2) — `/.well-known/oauth-authorization-server` must return `"issuer": "http://localhost:8091"`, not Entra's issuer. Compliant clients abort if these differ.
+2. **`registration_endpoint` must be present** — MCP clients use RFC 7591 dynamic client registration to obtain a `client_id` before calling `/authorize`. Without it the client never proceeds.
+3. **Scope must target the app itself** — use `{client_id}/.default openid profile email` (not `api://{client_id}` which requires an Application ID URI configured in Azure). The GUID-based `/.default` scope always works.
+
+### Azure App Registration requirements
+
+- App Role `BillingViewer` defined with `Allowed member types: Users/Groups,Applications`, `Value: BillingViewer`
+- Redirect URI `http://localhost:8091/callback` registered as a **Web** redirect URI
+- **Admin consent must be granted** — App Roles cannot be user-consented by default. An Azure AD admin must grant consent once:
+  ```
+  https://login.microsoftonline.com/{TENANT_ID}/adminconsent?client_id={CLIENT_ID}
+  ```
+  Or via Portal: **Enterprise Applications → app → Permissions → Grant admin consent for [tenant]**
+- Users must be **assigned the `BillingViewer` App Role** in Portal: **Enterprise Applications → app → Users and Groups → Add user/group**
+
+### JWT validation
+
+- `aud` must equal `entra.client_id` (the app's own GUID)
+- Issuer accepted: both v2 (`login.microsoftonline.com/.../v2.0`) and v1 (`sts.windows.net/.../`)
+- `roles` claim must contain `"BillingViewer"` — if missing, user authenticated successfully but gets `403 Forbidden`
+- If `roles` is empty after successful login: the user has not been assigned the App Role in Azure
+
+### Environment variables
+
+| Variable | Example | Purpose |
+|---|---|---|
+| `ENTRA_TENANT_ID` | `6eedd2c9-...` | Azure AD tenant |
+| `ENTRA_CLIENT_ID` | `d803de61-...` | App registration client ID |
+| `ENTRA_CLIENT_SECRET` | `...` | Client secret for token exchange |
+| `MCP_PUBLIC_URL` | `http://localhost:8091` | Base URL the MCP server is reachable at (used in well-known metadata) |
+| `MCP_CALLBACK_URL` | `http://localhost:8091/callback` | Must match redirect URI registered in Azure |
+
+### Debugging checklist
+
+- `[oauth] 401 missing Authorization header` — normal on first connect; client should then read `/.well-known` endpoints
+- Client reads `/.well-known` but never calls `/authorize` → check `issuer` equals `MCP_PUBLIC_URL`, check `registration_endpoint` is present in metadata
+- `Entra error: invalid_resource` → scope uses `api://` prefix but Application ID URI not configured; switch to `{client_id}/.default`
+- Browser shows "Need admin approval" → admin consent not yet granted (see above)
+- `[oauth] FAIL missing_role` → user authenticated but `BillingViewer` App Role not assigned to them in Azure
+- `[oauth] OK oid=... upn=... roles=[BillingViewer]` → fully authenticated and authorised ✓
+
 ## Notable Conventions
 
 - **Case folding:** all `resource_name`, `resource_group`, `subscription_name`, and tag values are lowercased on ingest unless `--case-sensitive` is set. All regex filters are case-insensitive by default.
