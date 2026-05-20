@@ -183,4 +183,15 @@ impl Bills {
     pub fn push(&mut self, bill: BillEntry) {
         self.bills.push(bill);
     }
+
+    /// Merge another `Bills` into `self`, appending all entries and recalculating totals.
+    /// Used when combining multiple part CSVs from a single blob export into one dataset.
+    pub fn extend_with(&mut self, other: Bills) {
+        self.bills.extend(other.bills);
+        self.tag_names.extend(other.tag_names);
+        if self.billing_currency.is_none() {
+            self.billing_currency = other.billing_currency;
+        }
+        self.calc_all_totals();
+    }
 }

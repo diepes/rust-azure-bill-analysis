@@ -23,7 +23,7 @@ use axum::{
     routing::{get, post},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use bill_analysis::{bills::Bills, cmd_parse::FilterOpts, find_files};
+use bill_analysis::{bills::Bills, blob_source::{BlobSource, BlobSourceConfig}, cmd_parse::FilterOpts, find_files};
 use clap::Parser;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use rand::Rng;
@@ -191,6 +191,8 @@ struct CallerIdentity {
 struct AppState {
     cache: BillCache,
     data_dir: PathBuf,
+    /// None when blob env vars are absent.
+    blob: Option<Arc<BlobSource>>,
     /// None when --no-auth is set; all MCP callers are trusted.
     entra: Option<EntraConfig>,
     pkce_store: PkceStateStore,
@@ -1047,7 +1049,26 @@ async fn handle_tools_call(req: &RpcRequest, state: &AppState) -> RpcResponse {
 // ---------------------------------------------------------------------------
 
 async fn tool_list_available_months(state: &AppState) -> Result<String, String> {
-    let months = find_files::list_bill_months(&state.data_dir);
+    let mut months: std::collections::HashSet<String> =
+        find_files::list_bill_months(&state.data_dir).into_iter().collect();
+
+    if let Some(blob) = &state.blob {
+        match blob.list_date_range_folders().await {
+            Ok(date_ranges) => {
+                for dr in date_ranges {
+                    // Convert "YYYYMMDD-YYYYMMDD" → "YYYY-MM" using the start date.
+                    if dr.len() >= 6 {
+                        let ym = format!("{}-{}", &dr[..4], &dr[4..6]);
+                        months.insert(ym);
+                    }
+                }
+            }
+            Err(e) => eprintln!("[mcp] WARNING: blob list_date_range_folders failed: {e}"),
+        }
+    }
+
+    let mut months: Vec<String> = months.into_iter().collect();
+    months.sort();
     Ok(serde_json::to_string_pretty(&json!({ "months": months })).unwrap())
 }
 
@@ -1270,35 +1291,55 @@ async fn load_or_cache(
         }
     }
 
-    // Cache miss: locate and parse the CSV
     eprintln!("[mcp] cache MISS {month_str} — loading...");
-    let csv_path = find_files::find_bill_csv(&state.data_dir, month_str).ok_or_else(|| {
-        format!(
-            "No billing file found for '{}' in {:?}",
-            month_str, state.data_dir
-        )
-    })?;
 
-    let load_start = Instant::now();
-    let mut bills = Bills::default();
-    let filter_opts = FilterOpts {
-        case_sensitive: false,
-    };
-    bills
-        .parse_csv(&csv_path, &filter_opts)
-        .map_err(|e| format!("Failed to parse '{:?}': {}", csv_path, e))?;
-    eprintln!(
-        "[mcp] loaded {month_str} ({} rows) in {:.3}s",
-        bills.len(),
-        load_start.elapsed().as_secs_f64()
-    );
-
-    let bills = Arc::new(bills);
-    {
-        let mut cache = state.cache.write().await;
-        cache.insert((year, mon), Arc::clone(&bills));
+    // Try local CSV first.
+    if let Some(csv_path) = find_files::find_bill_csv(&state.data_dir, month_str) {
+        let load_start = Instant::now();
+        let mut bills = Bills::default();
+        let filter_opts = FilterOpts { case_sensitive: false };
+        bills
+            .parse_csv(&csv_path, &filter_opts)
+            .map_err(|e| format!("Failed to parse '{:?}': {}", csv_path, e))?;
+        eprintln!(
+            "[mcp] loaded {month_str} from local ({} rows) in {:.3}s",
+            bills.len(),
+            load_start.elapsed().as_secs_f64()
+        );
+        let bills = Arc::new(bills);
+        {
+            let mut cache = state.cache.write().await;
+            cache.insert((year, mon), Arc::clone(&bills));
+        }
+        return Ok(bills);
     }
-    Ok(bills)
+
+    // Fall back to blob storage.
+    if let Some(blob) = &state.blob {
+        eprintln!("[mcp] trying blob source for {month_str}");
+        let load_start = Instant::now();
+        let filter_opts = FilterOpts { case_sensitive: false };
+        let bills = blob
+            .load_bills_for_month(year, mon, &filter_opts)
+            .await
+            .map_err(|e| format!("Blob load failed for '{month_str}': {e}"))?;
+        eprintln!(
+            "[mcp] loaded {month_str} from blob ({} rows) in {:.3}s",
+            bills.len(),
+            load_start.elapsed().as_secs_f64()
+        );
+        let bills = Arc::new(bills);
+        {
+            let mut cache = state.cache.write().await;
+            cache.insert((year, mon), Arc::clone(&bills));
+        }
+        return Ok(bills);
+    }
+
+    Err(format!(
+        "No billing file found for '{}' in {:?} and no blob source configured",
+        month_str, state.data_dir
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -1521,9 +1562,35 @@ async fn main() {
         startup_validate_entra(cfg, bind_port).await;
     }
 
+    let blob_source = if let Some(cfg) = BlobSourceConfig::from_env() {
+        eprintln!("[mcp] blob source configured — container '{}', prefix '{}'",
+            cfg.container_name, cfg.prefix);
+        match BlobSource::new(cfg) {
+            Ok(source) => {
+                match source.list_date_range_folders().await {
+                    Ok(folders) => {
+                        eprintln!("[mcp] blob source connected; {} date-range folder(s):", folders.len());
+                        for f in &folders {
+                            eprintln!("[mcp]   {f}");
+                        }
+                    }
+                    Err(e) => eprintln!("[mcp] WARNING: blob listing failed: {e}"),
+                }
+                Some(Arc::new(source))
+            }
+            Err(e) => {
+                eprintln!("[mcp] WARNING: blob client init failed: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let state = AppState {
         cache: Arc::new(RwLock::new(HashMap::new())),
         data_dir: args.data_dir.clone(),
+        blob: blob_source,
         entra,
         pkce_store: Arc::new(RwLock::new(HashMap::new())),
         temp_codes: Arc::new(RwLock::new(HashMap::new())),

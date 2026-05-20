@@ -20,6 +20,7 @@ use crate::bills::bill_entry::extract_date_from_file_name;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -39,19 +40,29 @@ impl Bills {
         file_path: &PathBuf,
         filter_opts: &crate::cmd_parse::FilterOpts,
     ) -> Result<(), Box<dyn Error>> {
-        let start = Instant::now();
         let file = File::open(Path::new(file_path))?;
-        // 2024-06-23 tested mmap for faster read, no difference for 200k lines
-        //let mmap = unsafe { memmap::MmapOptions::new().map(&file).unwrap() };
-        //let mut reader = csv::Reader::from_reader(mmap.as_ref());
-        let mut reader = csv::Reader::from_reader(file);
-        // set file name
         self.file_name = file_path
             .clone()
             .into_os_string()
             .into_string()
             .expect("Could not convert path to string ?");
         self.file_short_name = extract_date_from_file_name(&self.file_name);
+        let short_name = self.file_short_name.clone();
+        self.parse_csv_from_reader(file, &short_name, filter_opts)
+    }
+
+    /// Parse CSV from any `Read` source (e.g. in-memory bytes from blob storage).
+    /// `source_name` is used as `file_short_name` and for progress logging.
+    pub fn parse_csv_from_reader<R: Read>(
+        &mut self,
+        reader: R,
+        source_name: &str,
+        filter_opts: &crate::cmd_parse::FilterOpts,
+    ) -> Result<(), Box<dyn Error>> {
+        let start = Instant::now();
+        let mut reader = csv::Reader::from_reader(reader);
+        self.file_name = source_name.to_string();
+        self.file_short_name = source_name.to_string();
         let mut line_number: usize = 0;
         for (line, result) in reader.deserialize().enumerate() {
             line_number = line + 2; // 1-based line number + header
@@ -59,7 +70,7 @@ impl Bills {
                 println!(
                     "Error parsing line #{} in file {}",
                     line_number,
-                    file_path.display()
+                    source_name
                 );
             }
             let mut bill: BillEntry = result?;

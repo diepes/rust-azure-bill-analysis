@@ -1,4 +1,5 @@
 pub mod az_disk;
+pub mod blob_source;
 pub mod bills;
 pub mod money;
 use bills::Bills;

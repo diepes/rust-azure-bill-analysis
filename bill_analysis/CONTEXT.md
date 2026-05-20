@@ -34,6 +34,10 @@ A Rust CLI tool that parses **Azure "Detailed" cost export CSVs** (amortized/enr
 | **PreparedRow** | Display-ready row produced by `prepare_rows` — carries NZD cost, USD cost, name, colour label, and `CostSource`; internal to the display module |
 | **FilterOpts** | Subset of options relevant to filtering (`case_sensitive`); passed to `BillFilter::new()` |
 | **DisplayOpts** | Subset of options relevant to rendering (`cost_min_display`, `tag_list`, `debug`); passed to display functions |
+| **AmortizedCost** | Azure cost export type where reservation charges are spread evenly across the benefit period (vs. ActualCost where they appear as a lump sum on purchase date). The MCP server exclusively uses AmortizedCost exports. _Avoid_: "daily bill", "amortized bill" |
+| **BlobExport** | A single Azure Cost Management export run stored in blob storage — one GUID folder per date-range (e.g. `20240801-20240831/{run-id}/`), containing a `manifest.json` and one or more **ExportPart** files. Because `dataOverwriteBehavior` is `OverwritePreviousReport`, there is exactly **one** run-ID folder per date-range; its files are overwritten in-place on each daily run. The `manifest.json` `runInfo.endDate` field reflects how current the data is. |
+| **ExportPart** | One `part_N_0001.csv` file within a **BlobExport**. A month's billing data is split across one or more **ExportPart**s. _Avoid_: "CSV file", "part file" |
+| **BlobSource** | Configuration for reading billing data from Azure Blob Storage: service URL (`AZ_BILLING_BLOB_SERVICE_URL`), container name (`AZ_BILLING_CONTAINER_NAME`), and path prefix (`AZ_BILLING_BLOB_PREFIX`). Active when all three env vars are set. |
 | **MCP** | Model Context Protocol — a standard for exposing tools to LLMs over HTTP |
 | **MCP tool** | A named function the LLM can invoke via MCP (e.g. `get_monthly_cost`) |
 | **BillCache** | Lazy in-memory cache mapping `YearMonth → Bills`; populated on first access, retained for the server lifetime |

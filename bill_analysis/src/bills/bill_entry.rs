@@ -16,7 +16,7 @@ pub struct BillEntry {
     pub subscription_name: String,
     #[serde(alias = "Date", deserialize_with = "deserialize_date")]
     pub date: String,
-    #[serde(alias = "Product")]
+    #[serde(alias = "Product", alias = "ProductName")]
     pub product: String,
     #[serde(alias = "MeterId")]
     pub meter_id: String,

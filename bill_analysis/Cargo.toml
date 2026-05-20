@@ -12,7 +12,11 @@ name = "bill_analysis_mcp"
 path = "src/bin/mcp.rs"
 
 [dependencies]
+azure_core = "1.0"
+azure_identity = "1.0"
+azure_storage_blob = "1.0"
 base64 = "0.22"
+futures = "0.3"
 chrono = "0.4"
 clap = { version = "^4.5.4", features = ["derive"] }
 colored = "^2.1.0"
