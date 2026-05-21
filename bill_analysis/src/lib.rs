@@ -6,6 +6,7 @@ use bills::Bills;
 use colored::Colorize;
 pub mod cmd_parse;
 pub mod find_files;
+pub use bills::repository::BillRepository;
 use std::{
     f64,
     path::{Path, PathBuf},
@@ -235,5 +236,18 @@ fn f64_to_currency(value: f64, decimal_places: usize) -> String {
         format!("-{}", result)
     } else {
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BillRepository;
+
+    #[test]
+    fn bill_repository_accessible_from_crate_root() {
+        // BillRepository must be re-exported at the crate root so both the CLI
+        // and external consumers can use `bill_analysis::BillRepository` without
+        // knowing the internal module path.
+        let _: fn(_, _) -> BillRepository = BillRepository::new;
     }
 }

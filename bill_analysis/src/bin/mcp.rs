@@ -4,25 +4,23 @@
 //!   POST /mcp  — JSON-RPC 2.0 requests (requires BillingViewer App Role unless --no-auth)
 //!   GET  /mcp  — Health check
 //!
-//! OAuth 2.0 Authorization Code + PKCE proxy against Microsoft Entra ID:
-//!   GET  /.well-known/oauth-authorization-server  — OAuth metadata discovery
-//!   GET  /authorize                               — Redirect browser to Entra
-//!   GET  /callback                                — Receive Entra code, issue server code
-//!   POST /token                                   — Exchange server code for Entra access token
+//! OAuth 2.0 Authorization Code + PKCE proxy against Microsoft Entra ID is
+//! implemented in the `oauth_proxy` sub-module.
 //!
 //! Usage: bill_analysis_mcp --data-dir <path> [--port <port>] [--host <host>] [--no-auth]
-//! Config: ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET,
-//!         MCP_PUBLIC_URL, MCP_CALLBACK_URL (optional; .env or env)
+//! Config: ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET, MCP_URL (or .env)
+
+mod oauth_proxy;
 
 use axum::{
-    Form, Json, Router,
-    extract::{Query, Request, State},
+    Json, Router,
+    extract::State,
     http::StatusCode,
     middleware::{self, Next},
-    response::{IntoResponse, Redirect, Response},
+    response::{IntoResponse, Response},
     routing::{get, post},
+    extract::Request,
 };
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use bill_analysis::{
     bills::{
         cost_query::{query_cost, CostQuery, round2},
@@ -31,13 +29,16 @@ use bill_analysis::{
     blob_source::{BlobSource, BlobSourceConfig},
 };
 use clap::Parser;
-use jsonwebtoken::{Algorithm, DecodingKey, Validation};
-use rand::Rng;
+use oauth_proxy::{
+    AppState,
+    authorize_handler, callback_handler, load_entra_config,
+    oauth_metadata_handler, oauth_protected_resource_handler,
+    parse_bind_addr_from_url, register_handler,
+    require_auth, startup_validate_entra, token_handler,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Instant};
-use tokio::sync::RwLock;
+use std::{path::PathBuf, sync::Arc, time::Instant};
 
 // ---------------------------------------------------------------------------
 // CLI args
@@ -53,11 +54,11 @@ struct Args {
     #[arg(long)]
     data_dir: PathBuf,
 
-    /// TCP port to listen on. Defaults to the port in MCP_PUBLIC_URL, or 3000.
+    /// TCP port to listen on. Defaults to the port in MCP_URL, or 3000.
     #[arg(long)]
     port: Option<u16>,
 
-    /// Host address to bind to. Defaults to the host in MCP_PUBLIC_URL, or 127.0.0.1.
+    /// Host address to bind to. Defaults to the host in MCP_URL, or 127.0.0.1.
     #[arg(long)]
     host: Option<String>,
 
@@ -65,140 +66,6 @@ struct Args {
     /// Without this flag the server refuses to start if Entra env vars are missing.
     #[arg(long)]
     no_auth: bool,
-}
-
-// ---------------------------------------------------------------------------
-// Shared state
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Entra OAuth configuration
-// ---------------------------------------------------------------------------
-
-/// Entra OAuth 2.0 configuration loaded from .env / environment variables.
-#[derive(Clone)]
-struct EntraConfig {
-    tenant_id: String,
-    client_id: String,
-    client_secret: String,
-    /// Base URL used for both public and callback purposes.
-    url: String,
-}
-
-impl EntraConfig {
-    fn redirect_uri(&self) -> String {
-        format!("{}/callback", self.url)
-    }
-    fn authorize_url(&self) -> String {
-        format!(
-            "https://login.microsoftonline.com/{}/oauth2/v2.0/authorize",
-            self.tenant_id
-        )
-    }
-    fn token_url(&self) -> String {
-        format!(
-            "https://login.microsoftonline.com/{}/oauth2/v2.0/token",
-            self.tenant_id
-        )
-    }
-    fn jwks_url(&self) -> String {
-        format!(
-            "https://login.microsoftonline.com/{}/discovery/v2.0/keys",
-            self.tenant_id
-        )
-    }
-    fn issuer_v2(&self) -> String {
-        format!("https://login.microsoftonline.com/{}/v2.0", self.tenant_id)
-    }
-    fn issuer_v1(&self) -> String {
-        format!("https://sts.windows.net/{}/", self.tenant_id)
-    }
-    fn oidc_discovery_url(&self) -> String {
-        format!(
-            "https://login.microsoftonline.com/{}/.well-known/openid-configuration",
-            self.tenant_id
-        )
-    }
-}
-
-fn load_entra_config() -> Option<EntraConfig> {
-    let tenant_id = std::env::var("ENTRA_TENANT_ID")
-        .ok()
-        .filter(|s| !s.is_empty())?;
-    let client_id = std::env::var("ENTRA_CLIENT_ID")
-        .ok()
-        .filter(|s| !s.is_empty())?;
-    let client_secret = std::env::var("ENTRA_CLIENT_SECRET")
-        .ok()
-        .filter(|s| !s.is_empty())?;
-    let url = std::env::var("MCP_URL").ok().filter(|s| !s.is_empty())?; // Single URL
-
-    Some(EntraConfig {
-        tenant_id,
-        client_id,
-        client_secret,
-        url,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// OAuth flow state types
-// ---------------------------------------------------------------------------
-
-/// Per-authorize-request state, keyed by the server-generated OAuth `state` parameter.
-/// Stored between GET /authorize and GET /callback, pruned after 10 minutes.
-struct PkceFlowState {
-    code_challenge: String,
-    code_challenge_method: String,
-    /// The MCP client's redirect_uri — where we redirect after a successful callback.
-    client_redirect_uri: String,
-    /// The client's original `state` value, echoed back in the redirect.
-    client_state: String,
-    created_at: Instant,
-}
-
-/// Short-lived entry mapping a server-issued authorization code to an Entra access token.
-/// Consumed once in POST /token; pruned after 5 minutes.
-#[allow(dead_code)]
-struct TempCodeEntry {
-    access_token: String,
-    code_challenge: String,
-    code_challenge_method: String,
-    created_at: Instant,
-}
-
-/// Cached Entra JSON Web Key Set, refreshed on key-not-found.
-struct JwksCacheEntry {
-    keys: Vec<Value>,
-}
-
-type PkceStateStore = Arc<RwLock<HashMap<String, PkceFlowState>>>;
-type TempCodeStore = Arc<RwLock<HashMap<String, TempCodeEntry>>>;
-type JwksCache = Arc<RwLock<Option<JwksCacheEntry>>>;
-
-// ---------------------------------------------------------------------------
-// Authenticated caller identity
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-struct CallerIdentity {
-    oid: String,
-    upn: String,
-    roles: Vec<String>,
-}
-
-// ---------------------------------------------------------------------------
-// Shared state
-// ---------------------------------------------------------------------------
-
-#[derive(Clone)]
-struct AppState {
-    repo: Arc<BillRepository>,
-    /// None when --no-auth is set; all MCP callers are trusted.
-    entra: Option<EntraConfig>,
-    pkce_store: PkceStateStore,
-    temp_codes: TempCodeStore,
-    jwks_cache: JwksCache,
 }
 
 // ---------------------------------------------------------------------------
@@ -255,11 +122,7 @@ impl RpcResponse {
 // ---------------------------------------------------------------------------
 
 async fn mcp_get_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let auth = if state.entra.is_some() {
-        "entra"
-    } else {
-        "disabled"
-    };
+    let auth = if state.entra.is_some() { "entra" } else { "disabled" };
     Json(json!({ "status": "ok", "auth": auth }))
 }
 
@@ -273,7 +136,7 @@ async fn log_request(req: Request, next: Next) -> Response {
     let is_probe = method == axum::http::Method::GET && uri.path() == "/mcp";
     let start = Instant::now();
     if !is_probe {
-        log::debug!("[http] {} {}", method, uri,);
+        log::debug!("[http] {} {}", method, uri);
     }
     let resp = next.run(req).await;
     if !is_probe {
@@ -284,600 +147,6 @@ async fn log_request(req: Request, next: Next) -> Response {
         );
     }
     resp
-}
-
-// ---------------------------------------------------------------------------
-// OAuth 2.0 — discovery, authorize, callback, token
-// ---------------------------------------------------------------------------
-
-async fn oauth_metadata_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let entra = match &state.entra {
-        Some(e) => e,
-        None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
-    };
-    let base = &entra.url;
-    let body = json!({
-        // issuer MUST equal the URL this metadata was fetched from (RFC 9207 §2).
-        // The MCP server is an OAuth proxy — its own base URL is the issuer,
-        // not Entra's. A mismatch causes compliant clients to abort before /authorize.
-        "issuer": base,
-        "authorization_endpoint": format!("{}/authorize", base),
-        "token_endpoint": format!("{}/token", base),
-        "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code"],
-        "code_challenge_methods_supported": ["S256"],
-        "scopes_supported": ["openid", "profile", "email"],
-        // RFC 7591 dynamic client registration — required by MCP 2025 spec.
-        // Without this field compliant clients have no client_id and won't call /authorize.
-        "registration_endpoint": format!("{}/register", base),
-    });
-    log::debug!("  [oauth] authorization-server metadata: {body}");
-    Json(body).into_response()
-}
-
-/// RFC 7591 — Dynamic Client Registration.
-/// MCP clients POST here to obtain a client_id before starting the auth flow.
-/// This is a stateless implementation: any valid registration request gets the
-/// server's own client_id echoed back (the Entra app registration is already
-/// configured with the correct redirect URIs and app roles).
-async fn register_handler(
-    State(state): State<AppState>,
-    body: axum::extract::Json<Value>,
-) -> Response {
-    let entra = match &state.entra {
-        Some(e) => e,
-        None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
-    };
-    let redirect_uris = body.get("redirect_uris").cloned().unwrap_or(json!([]));
-    log::debug!(
-        "  [oauth] /register client_name={:?} redirect_uris={redirect_uris}",
-        body.get("client_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-    );
-    // Return the pre-registered Entra app client_id. No secret needed for PKCE.
-    Json(json!({
-        "client_id": entra.client_id,
-        "client_id_issued_at": 0,
-        "redirect_uris": redirect_uris,
-        "grant_types": ["authorization_code"],
-        "response_types": ["code"],
-        "token_endpoint_auth_method": "none",
-    }))
-    .into_response()
-}
-
-/// RFC 9728 — OAuth 2.0 Protected Resource Metadata.
-/// Served at `/.well-known/oauth-protected-resource` (and the `/mcp` path variant).
-/// Tells OAuth clients which authorization server protects this resource so they
-/// know where to fetch AS metadata (`/.well-known/oauth-authorization-server`).
-async fn oauth_protected_resource_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let entra = match &state.entra {
-        Some(e) => e,
-        None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
-    };
-    let base = &entra.url;
-    let body = json!({
-        "resource": format!("{}/mcp", base),
-        "authorization_servers": [base],
-    });
-    log::debug!("  [oauth] protected-resource: {body}");
-    Json(body).into_response()
-}
-
-#[derive(Deserialize)]
-#[allow(dead_code)]
-struct AuthorizeParams {
-    response_type: Option<String>,
-    client_id: Option<String>,
-    redirect_uri: String,
-    state: Option<String>,
-    code_challenge: String,
-    code_challenge_method: Option<String>,
-    scope: Option<String>,
-}
-
-async fn authorize_handler(
-    State(state): State<AppState>,
-    Query(params): Query<AuthorizeParams>,
-) -> Response {
-    log::debug!(
-        "  [oauth] /authorize called with client_id={:?}, redirect_uri={}",
-        params.client_id, params.redirect_uri
-    );
-
-    let entra = match &state.entra {
-        Some(e) => e.clone(),
-        None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
-    };
-
-    let method = params.code_challenge_method.as_deref().unwrap_or("S256");
-    if method != "S256" {
-        log::warn!(
-            "  [oauth] FAIL /authorize unsupported code_challenge_method={}",
-            method
-        );
-        return (
-            StatusCode::BAD_REQUEST,
-            "only S256 code_challenge_method supported",
-        )
-            .into_response();
-    }
-
-    let server_state = random_string(32);
-    let client_state = params.state.unwrap_or_default();
-    // Use openid/profile/email only — we validate the ID token (aud=client_id always,
-    // roles claim included for assigned app roles). This avoids AADSTS650057 which
-    // fires when {client_id}/.default is used but the app hasn't added itself to
-    // its own API permissions in the Azure Portal.
-    let default_scope = "openid profile email".to_string();
-    let raw_scope = params
-        .scope
-        .filter(|s| !s.is_empty())
-        .unwrap_or(default_scope.clone());
-    // Normalise: strip any {client_id}/.default tokens the MCP client may inject,
-    // keeping only standard OIDC scopes.
-    let scope: String = {
-        let filtered: Vec<&str> = raw_scope
-            .split_whitespace()
-            .filter(|tok| matches!(*tok, "openid" | "profile" | "email"))
-            .collect();
-        if filtered.is_empty() {
-            default_scope
-        } else {
-            filtered.join(" ")
-        }
-    };
-    log::debug!("  [oauth] /authorize using scope: {scope:?}");
-
-    {
-        let mut store = state.pkce_store.write().await;
-        // Prune stale entries (>10 min)
-        store.retain(|_, v| v.created_at.elapsed().as_secs() < 600);
-        store.insert(
-            server_state.clone(),
-            PkceFlowState {
-                code_challenge: params.code_challenge,
-                code_challenge_method: method.to_string(),
-                client_redirect_uri: params.redirect_uri,
-                client_state,
-                created_at: Instant::now(),
-            },
-        );
-    }
-
-    let target = format!(
-        "{}?response_type=code&client_id={}&redirect_uri={}&state={}&scope={}&prompt=select_account",
-        entra.authorize_url(),
-        url_encode(&entra.client_id),
-        url_encode(&entra.redirect_uri()),
-        url_encode(&server_state),
-        url_encode(&scope),
-    );
-    log::debug!("  [oauth] /authorize redirecting to Entra: {}", target);
-    Redirect::temporary(&target).into_response()
-}
-
-#[derive(Deserialize)]
-struct CallbackParams {
-    code: Option<String>,
-    state: Option<String>,
-    error: Option<String>,
-    error_description: Option<String>,
-}
-
-async fn callback_handler(
-    State(state): State<AppState>,
-    Query(params): Query<CallbackParams>,
-) -> Response {
-    let entra = match &state.entra {
-        Some(e) => e.clone(),
-        None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
-    };
-
-    if let Some(err) = &params.error {
-        let desc = params.error_description.as_deref().unwrap_or("");
-        log::debug!("  [oauth] Entra authorize error={err} description={desc}");
-        return (StatusCode::BAD_GATEWAY, format!("Entra error: {err}")).into_response();
-    }
-
-    let entra_code = match &params.code {
-        Some(c) => c.clone(),
-        None => return (StatusCode::BAD_REQUEST, "missing code").into_response(),
-    };
-    let server_state = match &params.state {
-        Some(s) => s.clone(),
-        None => return (StatusCode::BAD_REQUEST, "missing state").into_response(),
-    };
-
-    let pkce_entry = {
-        let mut store = state.pkce_store.write().await;
-        match store.remove(&server_state) {
-            Some(e) => e,
-            None => {
-                log::warn!("  [oauth] FAIL callback unknown or expired state={server_state}");
-                return (StatusCode::BAD_REQUEST, "unknown or expired state").into_response();
-            }
-        }
-    };
-
-    // Exchange code with Entra (confidential client, no PKCE on Entra side)
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(entra.token_url())
-        .form(&[
-            ("client_id", entra.client_id.as_str()),
-            ("client_secret", entra.client_secret.as_str()),
-            ("grant_type", "authorization_code"),
-            ("code", &entra_code),
-            ("redirect_uri", &entra.redirect_uri()),
-        ])
-        .send()
-        .await;
-
-    let token_json: Value = match resp {
-        Ok(r) => match r.json().await {
-            Ok(v) => v,
-            Err(e) => {
-                log::warn!("  [oauth] FAIL token exchange parse error: {e}");
-                return (StatusCode::BAD_GATEWAY, "token exchange failed").into_response();
-            }
-        },
-        Err(e) => {
-            log::warn!("  [oauth] FAIL token exchange request error: {e}");
-            return (StatusCode::BAD_GATEWAY, "token exchange failed").into_response();
-        }
-    };
-
-    // Use the id_token — it always has aud=client_id and carries the roles claim,
-    // so no special API-permissions configuration is needed in Azure Portal.
-    let access_token = match token_json["id_token"].as_str() {
-        Some(t) => t.to_string(),
-        None => {
-            let err = token_json["error"].as_str().unwrap_or("unknown");
-            let desc = token_json["error_description"].as_str().unwrap_or("");
-            log::warn!("  [oauth] FAIL token exchange entra_error={err} desc={desc}");
-            return (StatusCode::BAD_GATEWAY, "token exchange failed").into_response();
-        }
-    };
-
-    // Issue a short-lived server code
-    let server_code = random_string(40);
-    {
-        let mut codes = state.temp_codes.write().await;
-        // Prune stale entries (>5 min)
-        codes.retain(|_, v| v.created_at.elapsed().as_secs() < 300);
-        codes.insert(
-            server_code.clone(),
-            TempCodeEntry {
-                access_token,
-                code_challenge: pkce_entry.code_challenge,
-                code_challenge_method: pkce_entry.code_challenge_method,
-                created_at: Instant::now(),
-            },
-        );
-    }
-
-    let redirect = format!(
-        "{}?code={}&state={}",
-        pkce_entry.client_redirect_uri,
-        url_encode(&server_code),
-        url_encode(&pkce_entry.client_state),
-    );
-    Redirect::temporary(&redirect).into_response()
-}
-
-#[derive(Deserialize)]
-#[allow(dead_code)]
-struct TokenRequest {
-    grant_type: Option<String>,
-    code: String,
-    code_verifier: String,
-    redirect_uri: Option<String>,
-    client_id: Option<String>,
-}
-
-async fn token_handler(State(state): State<AppState>, Form(req): Form<TokenRequest>) -> Response {
-    if state.entra.is_none() {
-        return (StatusCode::NOT_FOUND, "auth disabled").into_response();
-    }
-
-    let entry = {
-        let mut codes = state.temp_codes.write().await;
-        match codes.remove(&req.code) {
-            Some(e) => e,
-            None => {
-                log::warn!("  [oauth] FAIL token exchange unknown or expired code");
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error":"invalid_grant","error_description":"unknown or expired code"})),
-                )
-                    .into_response();
-            }
-        }
-    };
-
-    // Validate PKCE: SHA256(code_verifier) == code_challenge
-    let computed = URL_SAFE_NO_PAD.encode(Sha256::digest(req.code_verifier.as_bytes()));
-    if computed != entry.code_challenge {
-        log::warn!("  [oauth] FAIL PKCE verification failed");
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error":"invalid_grant","error_description":"PKCE verification failed"})),
-        )
-            .into_response();
-    }
-
-    Json(json!({
-        "access_token": entry.access_token,
-        "token_type": "Bearer",
-        "expires_in": 3600,
-    }))
-    .into_response()
-}
-
-// ---------------------------------------------------------------------------
-// JWT validation and auth middleware
-// ---------------------------------------------------------------------------
-
-#[derive(Deserialize)]
-struct EntraClaims {
-    oid: String,
-    /// Entra v2 access tokens use `preferred_username`; v1 tokens may use `upn`.
-    #[serde(alias = "upn", alias = "unique_name", default)]
-    preferred_username: String,
-    #[serde(default)]
-    roles: Vec<String>,
-}
-
-async fn get_jwks(entra: &EntraConfig, cache: &JwksCache, kid: &str) -> Option<Vec<Value>> {
-    {
-        let lock = cache.read().await;
-        if let Some(entry) = lock.as_ref()
-            && entry.keys.iter().any(|k| k["kid"] == kid)
-        {
-            return Some(entry.keys.clone());
-        }
-    }
-    // Refresh
-    let client = reqwest::Client::new();
-    let resp = client.get(entra.jwks_url()).send().await.ok()?;
-    let body: Value = resp.json().await.ok()?;
-    let keys: Vec<Value> = body["keys"].as_array()?.clone();
-    {
-        let mut lock = cache.write().await;
-        *lock = Some(JwksCacheEntry { keys: keys.clone() });
-    }
-    Some(keys)
-}
-
-async fn validate_jwt(
-    token: &str,
-    entra: &EntraConfig,
-    jwks_cache: &JwksCache,
-) -> Result<CallerIdentity, String> {
-    // Decode header to get kid
-    let header = jsonwebtoken::decode_header(token).map_err(|e| format!("bad header: {e}"))?;
-    let kid = header.kid.as_deref().unwrap_or("").to_string();
-
-    let keys = get_jwks(entra, jwks_cache, &kid)
-        .await
-        .ok_or_else(|| "failed to fetch JWKS".to_string())?;
-
-    let jwk = keys
-        .iter()
-        .find(|k| k["kid"] == kid)
-        .ok_or_else(|| "kid not found in JWKS".to_string())?;
-
-    let n = jwk["n"].as_str().ok_or("missing n")?;
-    let e = jwk["e"].as_str().ok_or("missing e")?;
-    let decoding_key =
-        DecodingKey::from_rsa_components(n, e).map_err(|e| format!("bad key: {e}"))?;
-
-    let mut validation = Validation::new(Algorithm::RS256);
-    validation.set_audience(&[&entra.client_id]);
-    // Accept both v2 (login.microsoftonline.com/.../v2.0) and v1 (sts.windows.net/.../)
-    // issuers — client_credentials and some app tokens return v1 tokens by default.
-    validation.set_issuer(&[&entra.issuer_v2(), &entra.issuer_v1()]);
-
-    let token_data = jsonwebtoken::decode::<EntraClaims>(token, &decoding_key, &validation)
-        .map_err(|e| format!("{e}"))?;
-
-    Ok(CallerIdentity {
-        oid: token_data.claims.oid,
-        upn: token_data.claims.preferred_username,
-        roles: token_data.claims.roles,
-    })
-}
-
-fn unauthorized_response(public_url: &str, _client_id: &str, description: &str) -> Response {
-    let resource_metadata = format!("{public_url}/.well-known/oauth-protected-resource");
-    let www_authenticate = format!(
-        "Bearer realm=\"{public_url}\", resource_metadata=\"{resource_metadata}\", scope=\"openid profile email\""
-    );
-    log::debug!("  [oauth] 401 response with WWW-Authenticate: {www_authenticate}");
-    (
-        StatusCode::UNAUTHORIZED,
-        [
-            ("WWW-Authenticate", www_authenticate),
-            ("Content-Type", "text/plain".to_string()),
-        ],
-        description.to_string(),
-    )
-        .into_response()
-}
-
-async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    let entra = match &state.entra {
-        Some(e) => e.clone(),
-        None => return next.run(req).await, // --no-auth
-    };
-
-    let auth_header = req
-        .headers()
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-
-    let token = if let Some(t) = auth_header.strip_prefix("Bearer ") {
-        t.to_string()
-    } else {
-        log::warn!("  [oauth] FAIL missing Authorization header");
-        return unauthorized_response(&entra.url, &entra.client_id, "missing Authorization header");
-    };
-
-    match validate_jwt(&token, &entra, &state.jwks_cache).await {
-        Ok(caller) => {
-            if !caller.roles.contains(&"BillingViewer".to_string()) {
-                log::warn!(
-                    "  [oauth] FAIL missing_role oid={} upn={} roles={:?}",
-                    caller.oid, caller.upn, caller.roles
-                );
-                return (
-                    StatusCode::FORBIDDEN,
-                    "missing required App Role: BillingViewer",
-                )
-                    .into_response();
-            }
-            log::debug!(
-                "  [oauth] OK oid={} upn={} roles={:?}",
-                caller.oid, caller.upn, caller.roles
-            );
-            next.run(req).await
-        }
-        Err(reason) => {
-            log::warn!("  [oauth] FAIL token validation: {reason}");
-            unauthorized_response(
-                &entra.url,
-                &entra.client_id,
-                &format!("invalid token: {reason}"),
-            )
-        }
-    }
-}
-
-async fn startup_validate_entra(entra: &EntraConfig, bind_port: u16) {
-    log::info!("[startup] Validating Entra configuration ...");
-
-    // Warn if callback URL port doesn't match the actual bind port.
-    if let Some(url_port) = entra
-        .url
-        .split(':')
-        .nth(1)
-        .and_then(|p| p.trim_end_matches('/').parse::<u16>().ok())
-        && url_port != bind_port
-    {
-        log::warn!(
-            "[startup] ⚠ MCP_CALLBACK_URL port ({url_port}) does not match \
-                 --port ({bind_port}). The callback URL will be unreachable.\n\
-                 \x20 Fix: set MCP_CALLBACK_URL=http://localhost:{bind_port} or run with --port {url_port}"
-        );
-    }
-
-    // 1. OIDC discovery — proves tenant_id is valid, warms JWKS metadata
-    let client = reqwest::Client::new();
-    match client.get(entra.oidc_discovery_url()).send().await {
-        Ok(r) if r.status().is_success() => {
-            log::info!("[startup] ✓ Entra OIDC discovery OK (tenant_id valid)");
-        }
-        Ok(r) => {
-            log::error!(
-                "[startup] ✗ Entra OIDC discovery returned {}: check ENTRA_TENANT_ID",
-                r.status()
-            );
-        }
-        Err(e) => {
-            log::error!("[startup] ✗ Entra OIDC discovery request failed: {e}");
-        }
-    }
-
-    // 2. Client credentials probe — validates client_id + client_secret.
-    // Uses openid-connect token endpoint with client_credentials grant.
-    // We request the app's own API scope; if that fails (e.g. no API permissions
-    // configured yet) we still log the raw error for diagnostics.
-    let probe = client
-        .post(entra.token_url())
-        .form(&[
-            ("grant_type", "client_credentials"),
-            ("client_id", &entra.client_id),
-            ("client_secret", &entra.client_secret),
-            ("scope", &format!("api://{}/.default", entra.client_id)),
-        ])
-        .send()
-        .await;
-
-    match probe {
-        Ok(r) => {
-            let body: Value = r.json().await.unwrap_or_default();
-            if body["error"].is_null() {
-                log::info!("[startup] ✓ Entra client credentials probe OK (client_id/secret valid)");
-            } else {
-                let err = body["error"].as_str().unwrap_or("?");
-                let desc = body["error_description"].as_str().unwrap_or("");
-                log::error!("[startup] ✗ Client credentials probe error={err}: {desc}");
-                log::info!("[startup]   → check ENTRA_CLIENT_ID and ENTRA_CLIENT_SECRET");
-            }
-        }
-        Err(e) => {
-            log::error!("[startup] ✗ Client credentials probe request failed: {e}");
-        }
-    }
-
-    // 3. Redirect URI — advisory only (can't validate without Graph API perms)
-    log::info!(
-        "[startup] ℹ Callback URL (must be registered in app registration): {}",
-        entra.redirect_uri()
-    );
-    log::info!(
-        "[startup] ℹ MCP OAuth metadata base URL (must be reachable by MCP clients): {}",
-        entra.url
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Parse `host` and `port` from a URL like `http://localhost:8091`.
-/// Maps `localhost` → `127.0.0.1` for binding. Returns `None` if unparseable.
-fn parse_bind_addr_from_url(url: &str) -> Option<(String, u16)> {
-    // Strip scheme
-    let rest = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))?;
-    // Take only the authority (before any path)
-    let authority = rest.split('/').next()?;
-    // Split host:port
-    let (host, port_str) = authority.rsplit_once(':')?;
-    let port: u16 = port_str.parse().ok()?;
-    let host = if host == "localhost" {
-        "127.0.0.1"
-    } else {
-        host
-    }
-    .to_string();
-    Some((host, port))
-}
-
-fn random_string(len: usize) -> String {
-    let mut rng = rand::thread_rng();
-    (0..len)
-        .map(|_| char::from(rng.gen_range(b'a'..=b'z')))
-        .collect()
-}
-
-/// Percent-encode non-unreserved URI characters.
-fn url_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 3);
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
 }
 
 // ---------------------------------------------------------------------------
@@ -899,7 +168,7 @@ async fn mcp_handler(State(state): State<AppState>, Json(req): Json<RpcRequest>)
             "[mcp] ← notification in {:.1}ms",
             start.elapsed().as_secs_f64() * 1000.0
         );
-        return axum::http::StatusCode::ACCEPTED.into_response();
+        return StatusCode::ACCEPTED.into_response();
     }
 
     let resp = match method {
@@ -926,8 +195,6 @@ async fn mcp_handler(State(state): State<AppState>, Json(req): Json<RpcRequest>)
 // ---------------------------------------------------------------------------
 
 fn handle_initialize(req: &RpcRequest) -> RpcResponse {
-    // Echo the client's requested protocol version so we stay compatible as
-    // the MCP spec evolves, falling back to the last known version.
     let protocol_version = req
         .params
         .as_ref()
@@ -1075,18 +342,9 @@ async fn tool_get_monthly_cost(
         .get("month")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing required argument 'month'".to_string())?;
-    let rg_filter = args
-        .get("resource_group")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let name_filter = args
-        .get("resource_name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let tag_filter = args
-        .get("tag_filter")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let rg_filter = args.get("resource_group").and_then(|v| v.as_str()).unwrap_or("");
+    let name_filter = args.get("resource_name").and_then(|v| v.as_str()).unwrap_or("");
+    let tag_filter = args.get("tag_filter").and_then(|v| v.as_str()).unwrap_or("");
 
     let (year, mon) = parse_year_month(month)?;
     let bills = state.repo.get(year, mon).await?;
@@ -1119,21 +377,11 @@ async fn tool_get_daily_cost(
         .get("date")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing required argument 'date'".to_string())?;
-    let rg_filter = args
-        .get("resource_group")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let name_filter = args
-        .get("resource_name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let tag_filter = args
-        .get("tag_filter")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let rg_filter = args.get("resource_group").and_then(|v| v.as_str()).unwrap_or("");
+    let name_filter = args.get("resource_name").and_then(|v| v.as_str()).unwrap_or("");
+    let tag_filter = args.get("tag_filter").and_then(|v| v.as_str()).unwrap_or("");
 
     let (year, mon, _day) = parse_date(date_str)?;
-
     let bills = state.repo.get(year, mon).await?;
     let result = query_cost(&bills, &CostQuery {
         rg_filter: rg_filter.to_string(),
@@ -1173,15 +421,9 @@ fn parse_date(s: &str) -> Result<(u32, u32, u32), String> {
     if parts.len() != 3 {
         return Err(format!("Invalid date format '{}', expected YYYY-MM-DD", s));
     }
-    let year: u32 = parts[0]
-        .parse()
-        .map_err(|_| format!("Invalid year in '{}'", s))?;
-    let mon: u32 = parts[1]
-        .parse()
-        .map_err(|_| format!("Invalid month in '{}'", s))?;
-    let day: u32 = parts[2]
-        .parse()
-        .map_err(|_| format!("Invalid day in '{}'", s))?;
+    let year: u32 = parts[0].parse().map_err(|_| format!("Invalid year in '{}'", s))?;
+    let mon: u32 = parts[1].parse().map_err(|_| format!("Invalid month in '{}'", s))?;
+    let day: u32 = parts[2].parse().map_err(|_| format!("Invalid day in '{}'", s))?;
     Ok((year, mon, day))
 }
 
@@ -1230,7 +472,6 @@ mod tests {
 
 #[tokio::main]
 async fn main() {
-    // Load .env file from current directory (advisory — no-op if absent)
     dotenvy::dotenv().ok();
     env_logger::Builder::from_env(
         env_logger::Env::default().default_filter_or("bill_analysis=info"),
@@ -1239,8 +480,7 @@ async fn main() {
 
     let args = Args::parse();
 
-    // Resolve Entra config unless --no-auth was set
-    let entra: Option<EntraConfig> = if args.no_auth {
+    let entra = if args.no_auth {
         log::warn!("[bill_analysis_mcp] --no-auth set, all callers trusted");
         None
     } else {
@@ -1249,37 +489,27 @@ async fn main() {
             None => {
                 log::error!(
                     "[bill_analysis_mcp] missing required env vars \
-                     (ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET, MCP_PUBLIC_URL).\n\
+                     (ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET, MCP_URL).\n\
                      Copy .env.example to .env and fill in the values, or pass --no-auth to \
-                     disable authentication.\n\
-                     Optional for containerized MCP clients: set MCP_CALLBACK_URL separately \
-                     (e.g. MCP_PUBLIC_URL=http://host.docker.internal:8091 and \
-                     MCP_CALLBACK_URL=http://localhost:8091)."
+                     disable authentication."
                 );
                 std::process::exit(1);
             }
         }
     };
 
-    // Resolve bind host/port: CLI flag > MCP_URL env var > hardcoded defaults.
-    // This keeps local bind behavior sane when MCP_URL points at
-    // `host.docker.internal` for container clients.
     let mcp_url = std::env::var("MCP_URL").ok().filter(|s| !s.is_empty());
     let url_addr = entra
         .as_ref()
         .and_then(|e| parse_bind_addr_from_url(&e.url))
         .or_else(|| mcp_url.as_ref().and_then(|u| parse_bind_addr_from_url(u)));
     let bind_host = args.host.unwrap_or_else(|| {
-        url_addr
-            .as_ref()
-            .map(|(h, _)| h.clone())
-            .unwrap_or_else(|| "127.0.0.1".to_string())
+        url_addr.as_ref().map(|(h, _)| h.clone()).unwrap_or_else(|| "127.0.0.1".to_string())
     });
-    let bind_port = args
-        .port
-        .unwrap_or_else(|| url_addr.as_ref().map(|(_, p)| *p).unwrap_or(3000));
+    let bind_port = args.port.unwrap_or_else(|| {
+        url_addr.as_ref().map(|(_, p)| *p).unwrap_or(3000)
+    });
 
-    // Validate Entra app registration at startup
     if let Some(ref cfg) = entra {
         startup_validate_entra(cfg, bind_port).await;
     }
@@ -1312,13 +542,10 @@ async fn main() {
         None
     };
 
-    let state = AppState {
-        repo: Arc::new(BillRepository::new(args.data_dir.clone(), blob_source)),
+    let state = AppState::new(
+        Arc::new(BillRepository::new(args.data_dir.clone(), blob_source)),
         entra,
-        pkce_store: Arc::new(RwLock::new(HashMap::new())),
-        temp_codes: Arc::new(RwLock::new(HashMap::new())),
-        jwks_cache: Arc::new(RwLock::new(None)),
-    };
+    );
 
     let app = Router::new()
         .route(
@@ -1327,32 +554,12 @@ async fn main() {
                 .route_layer(middleware::from_fn_with_state(state.clone(), require_auth))
                 .get(mcp_get_handler),
         )
-        .route(
-            "/.well-known/oauth-authorization-server",
-            get(oauth_metadata_handler),
-        )
-        // Path-based variants probed by MCP clients (RFC 8414 §3.1 / RFC 9728 §5)
-        .route(
-            "/.well-known/oauth-authorization-server/mcp",
-            get(oauth_metadata_handler),
-        )
-        .route(
-            "/.well-known/openid-configuration/mcp",
-            get(oauth_metadata_handler),
-        )
-        // RFC 9728 — Protected Resource Metadata (primary + path variants)
-        .route(
-            "/.well-known/oauth-protected-resource",
-            get(oauth_protected_resource_handler),
-        )
-        .route(
-            "/.well-known/oauth-protected-resource/mcp",
-            get(oauth_protected_resource_handler),
-        )
-        .route(
-            "/mcp/.well-known/oauth-protected-resource",
-            get(oauth_protected_resource_handler),
-        )
+        .route("/.well-known/oauth-authorization-server", get(oauth_metadata_handler))
+        .route("/.well-known/oauth-authorization-server/mcp", get(oauth_metadata_handler))
+        .route("/.well-known/openid-configuration/mcp", get(oauth_metadata_handler))
+        .route("/.well-known/oauth-protected-resource", get(oauth_protected_resource_handler))
+        .route("/.well-known/oauth-protected-resource/mcp", get(oauth_protected_resource_handler))
+        .route("/mcp/.well-known/oauth-protected-resource", get(oauth_protected_resource_handler))
         .route("/authorize", get(authorize_handler))
         .route("/callback", get(callback_handler))
         .route("/token", post(token_handler))

@@ -38,6 +38,31 @@ pub struct PreparedSummary {
     pub skipped_count: usize,
 }
 
+/// Public representation of a prepared billing display, independent of I/O.
+/// Wraps `PreparedSummary` behind a stable public API so callers (CLI, MCP,
+/// tests) don't depend on the internal `PreparedSummary` type.
+pub struct DisplayPlan {
+    pub rows: Vec<PreparedRow>,
+    pub total: f64,
+    pub total_usd: f64,
+    pub skipped_count: usize,
+}
+
+/// Build a `DisplayPlan` for `bill_summary` filtered by `cost_type`.
+pub fn build_display_plan(
+    bill_summary: &SummaryData,
+    cost_type: CostType,
+    display_opts: &DisplayOpts,
+) -> DisplayPlan {
+    let prepared = prepare_rows(bill_summary, cost_type, display_opts);
+    DisplayPlan {
+        rows: prepared.rows,
+        total: prepared.total,
+        total_usd: prepared.total_usd,
+        skipped_count: prepared.skipped_count,
+    }
+}
+
 // ── Pure helper functions (no I/O) ────────────────────────────────────────────
 
 /// Assigns a display colour and visibility flag to each row; returns totals.
@@ -581,5 +606,31 @@ mod tests {
         assert!(big.visible);
         assert!(!small.visible);
         assert_eq!(prepared.skipped_count, 1);
+    }
+
+    // --- build_display_plan ---
+
+    #[test]
+    fn build_display_plan_row_count() {
+        let summary = make_summary(&[
+            ("rg-a", CostType::ResourceGroup, 100.0, CostSource::Original),
+            ("rg-b", CostType::ResourceGroup, 50.0, CostSource::Original),
+            ("rg-c", CostType::ResourceGroup, 10.0, CostSource::Original),
+        ]);
+        let opts = DisplayOpts { cost_min_display: 0.0, tag_list: false, debug: false };
+        let plan = build_display_plan(&summary, CostType::ResourceGroup, &opts);
+        assert_eq!(plan.rows.len(), 3, "expected 3 rows in plan");
+        assert_eq!(plan.skipped_count, 0);
+    }
+
+    #[test]
+    fn build_display_plan_secondary_is_green() {
+        let summary = make_summary(&[
+            ("secondary-rg", CostType::ResourceGroup, 75.0, CostSource::Secondary),
+        ]);
+        let opts = DisplayOpts { cost_min_display: 0.0, tag_list: false, debug: false };
+        let plan = build_display_plan(&summary, CostType::ResourceGroup, &opts);
+        let row = &plan.rows[0];
+        assert_eq!(row.colour, RowColour::Green, "Secondary source should be Green");
     }
 }
