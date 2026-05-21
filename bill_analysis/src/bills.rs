@@ -67,7 +67,7 @@ impl Bills {
         for (line, result) in reader.deserialize().enumerate() {
             line_number = line + 2; // 1-based line number + header
             if result.is_err() {
-                println!(
+                log::warn!(
                     "Error parsing line #{} in file {}",
                     line_number,
                     source_name
@@ -105,7 +105,7 @@ impl Bills {
             self.push(bill);
         }
         self.set_billing_currency()?;
-        println!(
+        log::debug!(
             "parse_csv {line_number} lines in {:.3}s",
             start.elapsed().as_secs_f64()
         );

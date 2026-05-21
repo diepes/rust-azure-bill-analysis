@@ -144,12 +144,27 @@ impl BlobSource {
     /// Downloads the manifest for the billing month `YYYY-MM` by listing blobs
     /// with prefix `{prefix}/{YYYYMM}` and parsing the first `manifest.json` found.
     ///
+    /// If a cached manifest already exists on disk **and** its `endDate` equals the
+    /// last day of the month at `T00:00:00` (i.e. the export is complete and will not
+    /// change), the cached copy is used and no network request is made.
+    ///
     /// Returns an error if no manifest is found for the given month.
     async fn fetch_manifest_for_month(
         &self,
         year: u32,
         month: u32,
     ) -> Result<BlobManifest, Box<dyn Error + Send + Sync>> {
+        // Try the local cache first.
+        if let Some(manifest) = self.try_load_cached_manifest(year, month)? {
+            if is_month_complete(year, month, &manifest.run_info.end_date) {
+                log::info!(
+                    "[blob] using cached manifest for {year}-{month:02} (endDate={})",
+                    manifest.run_info.end_date
+                );
+                return Ok(manifest);
+            }
+        }
+
         // Build a prefix that matches the start of the date-range folder for this month,
         // e.g. `eroad/Cortex-amortized-cost/202605` matches `…/20260501-20260531/…`.
         let month_prefix = format!("{}/{}{:02}", self.config.prefix, year, month);
@@ -167,10 +182,10 @@ impl BlobSource {
             if !name.ends_with("/manifest.json") {
                 continue;
             }
-            eprintln!("[blob] downloading manifest: {name}");
+            log::info!("[blob] downloading manifest: {name}");
             let bytes = self.download_blob(&name).await?;
             let manifest: BlobManifest = serde_json::from_slice(&bytes)?;
-            eprintln!(
+            log::info!(
                 "[blob] manifest endDate={} blobs={}",
                 manifest.run_info.end_date,
                 manifest.blobs.len()
@@ -181,7 +196,7 @@ impl BlobSource {
                 std::fs::create_dir_all(parent)?;
             }
             std::fs::write(&local_manifest, &bytes)?;
-            eprintln!("[blob] cached manifest → {}", local_manifest.display());
+            log::debug!("[blob] cached manifest → {}", local_manifest.display());
             return Ok(manifest);
         }
 
@@ -189,6 +204,51 @@ impl BlobSource {
             "No manifest.json found in blob storage for {year}-{month:02} under prefix '{month_prefix}'"
         )
         .into())
+    }
+
+    /// Looks for a cached `manifest.json` under the local blob cache directory for
+    /// the given month.  Returns `None` if nothing is found or parsing fails.
+    fn try_load_cached_manifest(
+        &self,
+        year: u32,
+        month: u32,
+    ) -> Result<Option<BlobManifest>, Box<dyn Error + Send + Sync>> {
+        // Local root: blob/{container}/{prefix}/
+        let mut cache_base = PathBuf::from("blob");
+        cache_base.push(&self.config.container_name);
+        for segment in self.config.prefix.split('/') {
+            if !segment.is_empty() {
+                cache_base.push(segment);
+            }
+        }
+        if !cache_base.exists() {
+            return Ok(None);
+        }
+
+        let month_prefix = format!("{}{:02}", year, month);
+
+        // Iterate date-range directories starting with YYYYMM (e.g. "20260401-20260430").
+        for dr_entry in std::fs::read_dir(&cache_base)? {
+            let dr_entry = dr_entry?;
+            let dr_name = dr_entry.file_name();
+            if !dr_name.to_string_lossy().starts_with(&month_prefix) {
+                continue;
+            }
+            // Look one level deeper for the run-id directory containing manifest.json.
+            let dr_path = dr_entry.path();
+            if !dr_path.is_dir() {
+                continue;
+            }
+            for run_entry in std::fs::read_dir(&dr_path)? {
+                let manifest_path = run_entry?.path().join("manifest.json");
+                if manifest_path.exists() {
+                    let bytes = std::fs::read(&manifest_path)?;
+                    let manifest: BlobManifest = serde_json::from_slice(&bytes)?;
+                    return Ok(Some(manifest));
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// Loads all billing part CSVs for the given month, using a local disk cache.
@@ -208,11 +268,11 @@ impl BlobSource {
         for blob_info in &manifest.blobs {
             let local_path = self.local_path_for_blob(&blob_info.blob_name);
             if local_path.exists() {
-                eprintln!("[blob] cache hit  → {}", local_path.display());
+                log::debug!("[blob] cache hit  → {}", local_path.display());
             } else {
-                eprintln!("[blob] downloading: {}", blob_info.blob_name);
+                log::info!("[blob] downloading: {}", blob_info.blob_name);
                 let bytes = self.download_blob(&blob_info.blob_name).await?;
-                eprintln!("[blob] writing {} bytes → {}", bytes.len(), local_path.display());
+                log::debug!("[blob] writing {} bytes → {}", bytes.len(), local_path.display());
                 if let Some(parent) = local_path.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
@@ -230,16 +290,20 @@ impl BlobSource {
             let mut part = Bills::default();
             part.parse_csv(&local_path, filter_opts)
                 .map_err(|e| -> Box<dyn Error + Send + Sync> { e.to_string().into() })?;
-            eprintln!("[blob] parsed {} entries from {}", part.len(), local_path.display());
+            log::debug!("[blob] parsed {} entries from {}", part.len(), local_path.display());
             match merged.as_mut() {
                 None => merged = Some(part),
                 Some(existing) => existing.extend_with(part),
             }
         }
 
-        merged.ok_or_else(|| {
+        let mut bills = merged.ok_or_else(|| -> Box<dyn Error + Send + Sync> {
             format!("Manifest for {year}-{month:02} contained no CSV parts").into()
-        })
+        })?;
+        // Override the short name with the canonical YYYY-MM label so display
+        // headers show "2026-04" instead of the full blob path.
+        bills.file_short_name = format!("{year}-{month:02}");
+        Ok(bills)
     }
 
     /// Downloads a single blob by name and returns its bytes.
@@ -277,9 +341,32 @@ fn is_date_range(s: &str) -> bool {
         && s[9..].bytes().all(|b| b.is_ascii_digit())
 }
 
+/// Returns `true` when `end_date` equals the last day of `YYYY-MM` at midnight,
+/// indicating the billing export is complete and will not be updated.
+/// e.g. year=2026, month=4, end_date="2026-04-30T00:00:00" → true
+fn is_month_complete(year: u32, month: u32, end_date: &str) -> bool {
+    let last_day = days_in_month(year, month);
+    end_date == format!("{year}-{month:02}-{last_day:02}T00:00:00")
+}
+
+fn days_in_month(year: u32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 30,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::is_date_range;
+    use super::{is_date_range, is_month_complete};
 
     #[test]
     fn valid_date_range() {
@@ -294,5 +381,18 @@ mod tests {
         assert!(!is_date_range("20240801_20240831")); // wrong separator
         assert!(!is_date_range("7192093c-7f13-4753-a186-58c842877141")); // run-id guid
         assert!(!is_date_range("manifest.json"));
+    }
+
+    #[test]
+    fn month_complete_detection() {
+        assert!(is_month_complete(2026, 4, "2026-04-30T00:00:00"));
+        assert!(is_month_complete(2026, 1, "2026-01-31T00:00:00"));
+        assert!(is_month_complete(2024, 2, "2024-02-29T00:00:00")); // leap year
+        assert!(is_month_complete(2025, 2, "2025-02-28T00:00:00")); // non-leap
+
+        // Partial month (current month export) — should NOT be treated as complete.
+        assert!(!is_month_complete(2026, 5, "2026-05-21T00:00:00"));
+        // Wrong day.
+        assert!(!is_month_complete(2026, 4, "2026-04-29T00:00:00"));
     }
 }

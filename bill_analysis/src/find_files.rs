@@ -228,6 +228,24 @@ pub fn in_folder(path: &Path, file_re_pattern: &str, debug: bool) -> (PathBuf, V
     (folder, files)
 }
 
+/// Parses a `YYYY-MM` or `YYYYMM` date shorthand from the leading component of
+/// `path` and returns `(year, month)`.  Returns `None` if the path does not
+/// start with a recognised date pattern.
+pub fn parse_year_month_path(path: &Path) -> Option<(u32, u32)> {
+    let s = path.to_str()?;
+    if s.len() >= 7 && s.as_bytes()[4] == b'-' {
+        let year: u32 = s[..4].parse().ok()?;
+        let month: u32 = s[5..7].parse().ok()?;
+        return Some((year, month));
+    }
+    if s.len() >= 6 && s[..6].bytes().all(|b| b.is_ascii_digit()) {
+        let year: u32 = s[..4].parse().ok()?;
+        let month: u32 = s[4..6].parse().ok()?;
+        return Some((year, month));
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

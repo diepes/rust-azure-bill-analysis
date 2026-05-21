@@ -272,11 +272,11 @@ async fn log_request(req: Request, next: Next) -> Response {
     let is_probe = method == axum::http::Method::GET && uri.path() == "/mcp";
     let start = Instant::now();
     if !is_probe {
-        eprintln!("[http] {} {}", method, uri,);
+        log::debug!("[http] {} {}", method, uri,);
     }
     let resp = next.run(req).await;
     if !is_probe {
-        eprintln!(
+        log::debug!(
             "[http]   → {} in {:.1}ms",
             resp.status(),
             start.elapsed().as_secs_f64() * 1000.0
@@ -310,7 +310,7 @@ async fn oauth_metadata_handler(State(state): State<AppState>) -> impl IntoRespo
         // Without this field compliant clients have no client_id and won't call /authorize.
         "registration_endpoint": format!("{}/register", base),
     });
-    eprintln!("  [oauth] authorization-server metadata: {body}");
+    log::debug!("  [oauth] authorization-server metadata: {body}");
     Json(body).into_response()
 }
 
@@ -328,7 +328,7 @@ async fn register_handler(
         None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
     };
     let redirect_uris = body.get("redirect_uris").cloned().unwrap_or(json!([]));
-    eprintln!(
+    log::debug!(
         "  [oauth] /register client_name={:?} redirect_uris={redirect_uris}",
         body.get("client_name")
             .and_then(|v| v.as_str())
@@ -360,7 +360,7 @@ async fn oauth_protected_resource_handler(State(state): State<AppState>) -> impl
         "resource": format!("{}/mcp", base),
         "authorization_servers": [base],
     });
-    eprintln!("  [oauth] protected-resource: {body}");
+    log::debug!("  [oauth] protected-resource: {body}");
     Json(body).into_response()
 }
 
@@ -380,7 +380,7 @@ async fn authorize_handler(
     State(state): State<AppState>,
     Query(params): Query<AuthorizeParams>,
 ) -> Response {
-    eprintln!(
+    log::debug!(
         "  [oauth] /authorize called with client_id={:?}, redirect_uri={}",
         params.client_id, params.redirect_uri
     );
@@ -392,7 +392,7 @@ async fn authorize_handler(
 
     let method = params.code_challenge_method.as_deref().unwrap_or("S256");
     if method != "S256" {
-        eprintln!(
+        log::warn!(
             "  [oauth] FAIL /authorize unsupported code_challenge_method={}",
             method
         );
@@ -427,7 +427,7 @@ async fn authorize_handler(
             filtered.join(" ")
         }
     };
-    eprintln!("  [oauth] /authorize using scope: {scope:?}");
+    log::debug!("  [oauth] /authorize using scope: {scope:?}");
 
     {
         let mut store = state.pkce_store.write().await;
@@ -453,7 +453,7 @@ async fn authorize_handler(
         url_encode(&server_state),
         url_encode(&scope),
     );
-    eprintln!("  [oauth] /authorize redirecting to Entra: {}", target);
+    log::debug!("  [oauth] /authorize redirecting to Entra: {}", target);
     Redirect::temporary(&target).into_response()
 }
 
@@ -476,7 +476,7 @@ async fn callback_handler(
 
     if let Some(err) = &params.error {
         let desc = params.error_description.as_deref().unwrap_or("");
-        eprintln!("  [oauth] Entra authorize error={err} description={desc}");
+        log::debug!("  [oauth] Entra authorize error={err} description={desc}");
         return (StatusCode::BAD_GATEWAY, format!("Entra error: {err}")).into_response();
     }
 
@@ -494,7 +494,7 @@ async fn callback_handler(
         match store.remove(&server_state) {
             Some(e) => e,
             None => {
-                eprintln!("  [oauth] FAIL callback unknown or expired state={server_state}");
+                log::warn!("  [oauth] FAIL callback unknown or expired state={server_state}");
                 return (StatusCode::BAD_REQUEST, "unknown or expired state").into_response();
             }
         }
@@ -518,12 +518,12 @@ async fn callback_handler(
         Ok(r) => match r.json().await {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("  [oauth] FAIL token exchange parse error: {e}");
+                log::warn!("  [oauth] FAIL token exchange parse error: {e}");
                 return (StatusCode::BAD_GATEWAY, "token exchange failed").into_response();
             }
         },
         Err(e) => {
-            eprintln!("  [oauth] FAIL token exchange request error: {e}");
+            log::warn!("  [oauth] FAIL token exchange request error: {e}");
             return (StatusCode::BAD_GATEWAY, "token exchange failed").into_response();
         }
     };
@@ -535,7 +535,7 @@ async fn callback_handler(
         None => {
             let err = token_json["error"].as_str().unwrap_or("unknown");
             let desc = token_json["error_description"].as_str().unwrap_or("");
-            eprintln!("  [oauth] FAIL token exchange entra_error={err} desc={desc}");
+            log::warn!("  [oauth] FAIL token exchange entra_error={err} desc={desc}");
             return (StatusCode::BAD_GATEWAY, "token exchange failed").into_response();
         }
     };
@@ -586,7 +586,7 @@ async fn token_handler(State(state): State<AppState>, Form(req): Form<TokenReque
         match codes.remove(&req.code) {
             Some(e) => e,
             None => {
-                eprintln!("  [oauth] FAIL token exchange unknown or expired code");
+                log::warn!("  [oauth] FAIL token exchange unknown or expired code");
                 return (
                     StatusCode::BAD_REQUEST,
                     Json(json!({"error":"invalid_grant","error_description":"unknown or expired code"})),
@@ -599,7 +599,7 @@ async fn token_handler(State(state): State<AppState>, Form(req): Form<TokenReque
     // Validate PKCE: SHA256(code_verifier) == code_challenge
     let computed = URL_SAFE_NO_PAD.encode(Sha256::digest(req.code_verifier.as_bytes()));
     if computed != entry.code_challenge {
-        eprintln!("  [oauth] FAIL PKCE verification failed");
+        log::warn!("  [oauth] FAIL PKCE verification failed");
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error":"invalid_grant","error_description":"PKCE verification failed"})),
@@ -694,7 +694,7 @@ fn unauthorized_response(public_url: &str, _client_id: &str, description: &str) 
     let www_authenticate = format!(
         "Bearer realm=\"{public_url}\", resource_metadata=\"{resource_metadata}\", scope=\"openid profile email\""
     );
-    eprintln!("  [oauth] 401 response with WWW-Authenticate: {www_authenticate}");
+    log::debug!("  [oauth] 401 response with WWW-Authenticate: {www_authenticate}");
     (
         StatusCode::UNAUTHORIZED,
         [
@@ -721,14 +721,14 @@ async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -
     let token = if let Some(t) = auth_header.strip_prefix("Bearer ") {
         t.to_string()
     } else {
-        eprintln!("  [oauth] FAIL missing Authorization header");
+        log::warn!("  [oauth] FAIL missing Authorization header");
         return unauthorized_response(&entra.url, &entra.client_id, "missing Authorization header");
     };
 
     match validate_jwt(&token, &entra, &state.jwks_cache).await {
         Ok(caller) => {
             if !caller.roles.contains(&"BillingViewer".to_string()) {
-                eprintln!(
+                log::warn!(
                     "  [oauth] FAIL missing_role oid={} upn={} roles={:?}",
                     caller.oid, caller.upn, caller.roles
                 );
@@ -738,14 +738,14 @@ async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -
                 )
                     .into_response();
             }
-            eprintln!(
+            log::debug!(
                 "  [oauth] OK oid={} upn={} roles={:?}",
                 caller.oid, caller.upn, caller.roles
             );
             next.run(req).await
         }
         Err(reason) => {
-            eprintln!("  [oauth] FAIL token validation: {reason}");
+            log::warn!("  [oauth] FAIL token validation: {reason}");
             unauthorized_response(
                 &entra.url,
                 &entra.client_id,
@@ -756,7 +756,7 @@ async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -
 }
 
 async fn startup_validate_entra(entra: &EntraConfig, bind_port: u16) {
-    eprintln!("[startup] Validating Entra configuration ...");
+    log::info!("[startup] Validating Entra configuration ...");
 
     // Warn if callback URL port doesn't match the actual bind port.
     if let Some(url_port) = entra
@@ -766,8 +766,8 @@ async fn startup_validate_entra(entra: &EntraConfig, bind_port: u16) {
         .and_then(|p| p.trim_end_matches('/').parse::<u16>().ok())
         && url_port != bind_port
     {
-        eprintln!(
-            "[startup] ⚠ WARNING: MCP_CALLBACK_URL port ({url_port}) does not match \
+        log::warn!(
+            "[startup] ⚠ MCP_CALLBACK_URL port ({url_port}) does not match \
                  --port ({bind_port}). The callback URL will be unreachable.\n\
                  \x20 Fix: set MCP_CALLBACK_URL=http://localhost:{bind_port} or run with --port {url_port}"
         );
@@ -777,16 +777,16 @@ async fn startup_validate_entra(entra: &EntraConfig, bind_port: u16) {
     let client = reqwest::Client::new();
     match client.get(entra.oidc_discovery_url()).send().await {
         Ok(r) if r.status().is_success() => {
-            eprintln!("[startup] ✓ Entra OIDC discovery OK (tenant_id valid)");
+            log::info!("[startup] ✓ Entra OIDC discovery OK (tenant_id valid)");
         }
         Ok(r) => {
-            eprintln!(
+            log::error!(
                 "[startup] ✗ Entra OIDC discovery returned {}: check ENTRA_TENANT_ID",
                 r.status()
             );
         }
         Err(e) => {
-            eprintln!("[startup] ✗ Entra OIDC discovery request failed: {e}");
+            log::error!("[startup] ✗ Entra OIDC discovery request failed: {e}");
         }
     }
 
@@ -809,25 +809,25 @@ async fn startup_validate_entra(entra: &EntraConfig, bind_port: u16) {
         Ok(r) => {
             let body: Value = r.json().await.unwrap_or_default();
             if body["error"].is_null() {
-                eprintln!("[startup] ✓ Entra client credentials probe OK (client_id/secret valid)");
+                log::info!("[startup] ✓ Entra client credentials probe OK (client_id/secret valid)");
             } else {
                 let err = body["error"].as_str().unwrap_or("?");
                 let desc = body["error_description"].as_str().unwrap_or("");
-                eprintln!("[startup] ✗ Client credentials probe error={err}: {desc}");
-                eprintln!("[startup]   → check ENTRA_CLIENT_ID and ENTRA_CLIENT_SECRET");
+                log::error!("[startup] ✗ Client credentials probe error={err}: {desc}");
+                log::info!("[startup]   → check ENTRA_CLIENT_ID and ENTRA_CLIENT_SECRET");
             }
         }
         Err(e) => {
-            eprintln!("[startup] ✗ Client credentials probe request failed: {e}");
+            log::error!("[startup] ✗ Client credentials probe request failed: {e}");
         }
     }
 
     // 3. Redirect URI — advisory only (can't validate without Graph API perms)
-    eprintln!(
+    log::info!(
         "[startup] ℹ Callback URL (must be registered in app registration): {}",
         entra.redirect_uri()
     );
-    eprintln!(
+    log::info!(
         "[startup] ℹ MCP OAuth metadata base URL (must be reachable by MCP clients): {}",
         entra.url
     );
@@ -887,14 +887,14 @@ async fn mcp_handler(State(state): State<AppState>, Json(req): Json<RpcRequest>)
     let start = Instant::now();
     let method = req.method.as_str();
     if let Some(params) = &req.params {
-        eprintln!("[mcp] → {method} {}", params);
+        log::debug!("[mcp] → {method} {}", params);
     } else {
-        eprintln!("[mcp] → {method}");
+        log::debug!("[mcp] → {method}");
     }
 
     // Notifications have no `id` — acknowledge but send no body.
     if req.id.is_none() {
-        eprintln!(
+        log::debug!(
             "[mcp] ← notification in {:.1}ms",
             start.elapsed().as_secs_f64() * 1000.0
         );
@@ -913,7 +913,7 @@ async fn mcp_handler(State(state): State<AppState>, Json(req): Json<RpcRequest>)
         ),
     };
 
-    eprintln!(
+    log::debug!(
         "[mcp] ← {method} in {:.1}ms",
         start.elapsed().as_secs_f64() * 1000.0
     );
@@ -1063,7 +1063,7 @@ async fn tool_list_available_months(state: &AppState) -> Result<String, String> 
                     }
                 }
             }
-            Err(e) => eprintln!("[mcp] WARNING: blob list_date_range_folders failed: {e}"),
+            Err(e) => log::warn!("[mcp] WARNING: blob list_date_range_folders failed: {e}"),
         }
     }
 
@@ -1230,7 +1230,7 @@ fn compute_cost(
         })
         .collect();
 
-    eprintln!(
+    log::debug!(
         "[mcp] compute_cost {} rows in {:.1}ms",
         row_count,
         t.elapsed().as_secs_f64() * 1000.0
@@ -1286,12 +1286,12 @@ async fn load_or_cache(
     {
         let cache = state.cache.read().await;
         if let Some(bills) = cache.get(&(year, mon)) {
-            eprintln!("[mcp] cache HIT  {month_str}");
+            log::debug!("[mcp] cache HIT  {month_str}");
             return Ok(Arc::clone(bills));
         }
     }
 
-    eprintln!("[mcp] cache MISS {month_str} — loading...");
+    log::debug!("[mcp] cache MISS {month_str} — loading...");
 
     // Try local CSV first.
     if let Some(csv_path) = find_files::find_bill_csv(&state.data_dir, month_str) {
@@ -1301,7 +1301,7 @@ async fn load_or_cache(
         bills
             .parse_csv(&csv_path, &filter_opts)
             .map_err(|e| format!("Failed to parse '{:?}': {}", csv_path, e))?;
-        eprintln!(
+        log::info!(
             "[mcp] loaded {month_str} from local ({} rows) in {:.3}s",
             bills.len(),
             load_start.elapsed().as_secs_f64()
@@ -1316,14 +1316,14 @@ async fn load_or_cache(
 
     // Fall back to blob storage.
     if let Some(blob) = &state.blob {
-        eprintln!("[mcp] trying blob source for {month_str}");
+        log::debug!("[mcp] trying blob source for {month_str}");
         let load_start = Instant::now();
         let filter_opts = FilterOpts { case_sensitive: false };
         let bills = blob
             .load_bills_for_month(year, mon, &filter_opts)
             .await
             .map_err(|e| format!("Blob load failed for '{month_str}': {e}"))?;
-        eprintln!(
+        log::info!(
             "[mcp] loaded {month_str} from blob ({} rows) in {:.3}s",
             bills.len(),
             load_start.elapsed().as_secs_f64()
@@ -1514,19 +1514,23 @@ mod tests {
 async fn main() {
     // Load .env file from current directory (advisory — no-op if absent)
     dotenvy::dotenv().ok();
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("bill_analysis=info"),
+    )
+    .init();
 
     let args = Args::parse();
 
     // Resolve Entra config unless --no-auth was set
     let entra: Option<EntraConfig> = if args.no_auth {
-        eprintln!("[bill_analysis_mcp] WARNING: --no-auth set, all callers trusted");
+        log::warn!("[bill_analysis_mcp] --no-auth set, all callers trusted");
         None
     } else {
         match load_entra_config() {
             Some(cfg) => Some(cfg),
             None => {
-                eprintln!(
-                    "[bill_analysis_mcp] ERROR: missing required env vars \
+                log::error!(
+                    "[bill_analysis_mcp] missing required env vars \
                      (ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET, MCP_PUBLIC_URL).\n\
                      Copy .env.example to .env and fill in the values, or pass --no-auth to \
                      disable authentication.\n\
@@ -1563,23 +1567,23 @@ async fn main() {
     }
 
     let blob_source = if let Some(cfg) = BlobSourceConfig::from_env() {
-        eprintln!("[mcp] blob source configured — container '{}', prefix '{}'",
+        log::debug!("[mcp] blob source configured — container '{}', prefix '{}'",
             cfg.container_name, cfg.prefix);
         match BlobSource::new(cfg) {
             Ok(source) => {
                 match source.list_date_range_folders().await {
                     Ok(folders) => {
-                        eprintln!("[mcp] blob source connected; {} date-range folder(s):", folders.len());
+                        log::debug!("[mcp] blob source connected; {} date-range folder(s):", folders.len());
                         for f in &folders {
-                            eprintln!("[mcp]   {f}");
+                            log::debug!("[mcp]   {f}");
                         }
                     }
-                    Err(e) => eprintln!("[mcp] WARNING: blob listing failed: {e}"),
+                    Err(e) => log::warn!("[mcp] WARNING: blob listing failed: {e}"),
                 }
                 Some(Arc::new(source))
             }
             Err(e) => {
-                eprintln!("[mcp] WARNING: blob client init failed: {e}");
+                log::warn!("[mcp] WARNING: blob client init failed: {e}");
                 None
             }
         }
@@ -1638,8 +1642,8 @@ async fn main() {
         .layer(middleware::from_fn(log_request));
 
     let addr = format!("{bind_host}:{bind_port}");
-    eprintln!("[bill_analysis_mcp] listening on http://{addr}/mcp");
-    eprintln!("[bill_analysis_mcp] data-dir: {:?}", args.data_dir);
+    log::info!("[bill_analysis_mcp] listening on http://{addr}/mcp");
+    log::info!("[bill_analysis_mcp] data-dir: {:?}", args.data_dir);
 
     let listener = tokio::net::TcpListener::bind(&addr)
         .await

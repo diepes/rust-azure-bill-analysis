@@ -103,6 +103,43 @@ pub fn load_bill(file_or_folder: &Path, filter_opts: &FilterOpts, debug: bool) -
     (latest_bill, file_name)
 }
 
+/// Like `load_bill`, but falls back to Azure Blob Storage when the path cannot
+/// be resolved to a local CSV file.
+///
+/// The blob fallback is active only when all three `AZ_BILLING_BLOB_*` env vars
+/// are set and the path looks like a date shorthand (`YYYY-MM` or `YYYYMM`).
+pub async fn load_bill_async(
+    file_or_folder: &Path,
+    filter_opts: &FilterOpts,
+    debug: bool,
+) -> (Bills, String) {
+    // Attempt to resolve to a local file first.
+    let resolved = find_files::resolve_date_shorthand(file_or_folder);
+    if resolved.exists() {
+        return load_bill(&resolved, filter_opts, debug);
+    }
+
+    // No local file — try blob storage if configured and path is a date shorthand.
+    if let Some(cfg) = blob_source::BlobSourceConfig::from_env() {
+        if let Some((year, month)) = find_files::parse_year_month_path(file_or_folder) {
+            let month_str = format!("{year}-{month:02}");
+            log::info!("[bill] no local file for {month_str}, trying blob storage");
+            let blob = blob_source::BlobSource::new(cfg)
+                .unwrap_or_else(|e| panic!("Failed to create blob source: {e}"));
+            let bills = blob
+                .load_bills_for_month(year, month, filter_opts)
+                .await
+                .unwrap_or_else(|e| {
+                    panic!("Failed to load bill from blob for {month_str}: {e}")
+                });
+            return (bills, month_str);
+        }
+    }
+
+    // Fall back to the sync path — will surface the original error if the path is invalid.
+    load_bill(file_or_folder, filter_opts, debug)
+}
+
 pub fn display_total_cost_summary(bills: &Bills, description: &str) {
     println!(
         "\n===  Displaying Azure cost summary.  {description} {} ===",
