@@ -144,9 +144,14 @@ impl BlobSource {
     /// Downloads the manifest for the billing month `YYYY-MM` by listing blobs
     /// with prefix `{prefix}/{YYYYMM}` and parsing the first `manifest.json` found.
     ///
-    /// If a cached manifest already exists on disk **and** its `endDate` equals the
-    /// last day of the month at `T00:00:00` (i.e. the export is complete and will not
-    /// change), the cached copy is used and no network request is made.
+    /// If a **canonical** cached manifest already exists on disk at
+    /// `blob/{container}/{prefix}/{YYYYMMDD-YYYYMMDD}/manifest.json` and its
+    /// `endDate` equals the last day of the month (i.e. the export is complete and
+    /// will not change), the cached copy is used and no network request is made.
+    ///
+    /// For in-progress months the blob is always consulted first; if blob access
+    /// fails the canonical local manifest is used as a fallback provided all its
+    /// CSV parts are already on disk.
     ///
     /// Returns an error if no manifest is found for the given month.
     async fn fetch_manifest_for_month(
@@ -154,7 +159,8 @@ impl BlobSource {
         year: u32,
         month: u32,
     ) -> Result<BlobManifest, Box<dyn Error + Send + Sync>> {
-        // Try the local cache first.
+        // Try the local cache first — use it unconditionally when the month is
+        // complete (export will never change again).
         if let Some(manifest) = self.try_load_cached_manifest(year, month)? {
             if is_month_complete(year, month, &manifest.run_info.end_date) {
                 log::info!(
@@ -165,6 +171,41 @@ impl BlobSource {
             }
         }
 
+        // Attempt to fetch the manifest from blob storage.
+        match self.fetch_manifest_from_blob(year, month).await {
+            Ok(manifest) => return Ok(manifest),
+            Err(blob_err) => {
+                // Blob storage unreachable — fall back to the best local manifest
+                // if all its CSV parts are already cached on disk.
+                if let Ok(Some(manifest)) = self.try_load_cached_manifest(year, month) {
+                    if self.all_parts_cached(&manifest) {
+                        log::warn!(
+                            "[blob] blob unreachable for {year}-{month:02} ({}); \
+                             falling back to local cache (endDate={})",
+                            blob_err,
+                            manifest.run_info.end_date
+                        );
+                        return Ok(manifest);
+                    }
+                }
+                return Err(blob_err);
+            }
+        }
+    }
+
+    /// Inner helper: fetches the manifest from blob storage and caches it to disk.
+    ///
+    /// The manifest is written to two locations:
+    /// - The run-ID-specific path it lives at in blob storage (preserves history).
+    /// - A **canonical** path directly inside the date-range folder, i.e.
+    ///   `blob/{container}/{prefix}/{YYYYMMDD-YYYYMMDD}/manifest.json`.
+    ///   This canonical file is what `try_load_cached_manifest` reads; it is
+    ///   overwritten on every successful fetch so it always reflects the latest run.
+    async fn fetch_manifest_from_blob(
+        &self,
+        year: u32,
+        month: u32,
+    ) -> Result<BlobManifest, Box<dyn Error + Send + Sync>> {
         // Build a prefix that matches the start of the date-range folder for this month,
         // e.g. `eroad/Cortex-amortized-cost/202605` matches `…/20260501-20260531/…`.
         let month_prefix = format!("{}/{}{:02}", self.config.prefix, year, month);
@@ -190,13 +231,33 @@ impl BlobSource {
                 manifest.run_info.end_date,
                 manifest.blobs.len()
             );
-            // Cache manifest to disk so it's visible alongside the CSVs.
-            let local_manifest = self.local_path_for_blob(&name);
-            if let Some(parent) = local_manifest.parent() {
+
+            // Write to the run-ID-specific path.
+            let run_id_path = self.local_path_for_blob(&name);
+            if let Some(parent) = run_id_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::write(&local_manifest, &bytes)?;
-            log::debug!("[blob] cached manifest → {}", local_manifest.display());
+            std::fs::write(&run_id_path, &bytes)?;
+            log::debug!("[blob] cached manifest (run-id) → {}", run_id_path.display());
+
+            // Also write to the canonical date-range-level path so that
+            // try_load_cached_manifest always finds the latest version in one place.
+            // The date-range segment is the first path component after the prefix.
+            let relative = name
+                .strip_prefix(&format!("{}/", self.config.prefix))
+                .unwrap_or(&name);
+            if let Some(date_range) = relative.split('/').next() {
+                if is_date_range(date_range) {
+                    let canonical_blob = format!("{}/{}/manifest.json", self.config.prefix, date_range);
+                    let canonical_path = self.local_path_for_blob(&canonical_blob);
+                    if let Some(parent) = canonical_path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(&canonical_path, &bytes)?;
+                    log::debug!("[blob] canonical manifest → {}", canonical_path.display());
+                }
+            }
+
             return Ok(manifest);
         }
 
@@ -206,8 +267,14 @@ impl BlobSource {
         .into())
     }
 
-    /// Looks for a cached `manifest.json` under the local blob cache directory for
-    /// the given month.  Returns `None` if nothing is found or parsing fails.
+    /// Looks for the canonical `manifest.json` at the date-range folder level under
+    /// the local blob cache directory for the given month.
+    ///
+    /// The canonical file (`blob/{container}/{prefix}/{YYYYMMDD-YYYYMMDD}/manifest.json`)
+    /// is written (and overwritten) by `fetch_manifest_from_blob` on every successful
+    /// blob fetch, so it always reflects the latest downloaded run.
+    ///
+    /// Returns `None` if no canonical manifest is found on disk.
     fn try_load_cached_manifest(
         &self,
         year: u32,
@@ -227,35 +294,42 @@ impl BlobSource {
 
         let month_prefix = format!("{}{:02}", year, month);
 
-        // Iterate date-range directories starting with YYYYMM (e.g. "20260401-20260430").
+        // Look for a canonical manifest.json directly inside each date-range directory
+        // that matches the month (e.g. "20260501-20260531").
         for dr_entry in std::fs::read_dir(&cache_base)? {
             let dr_entry = dr_entry?;
             let dr_name = dr_entry.file_name();
-            if !dr_name.to_string_lossy().starts_with(&month_prefix) {
+            let dr_name_str = dr_name.to_string_lossy();
+            if !dr_name_str.starts_with(&month_prefix) || !is_date_range(&dr_name_str) {
                 continue;
             }
-            // Look one level deeper for the run-id directory containing manifest.json.
-            let dr_path = dr_entry.path();
-            if !dr_path.is_dir() {
-                continue;
-            }
-            for run_entry in std::fs::read_dir(&dr_path)? {
-                let manifest_path = run_entry?.path().join("manifest.json");
-                if manifest_path.exists() {
-                    let bytes = std::fs::read(&manifest_path)?;
-                    let manifest: BlobManifest = serde_json::from_slice(&bytes)?;
-                    return Ok(Some(manifest));
-                }
+            let manifest_path = dr_entry.path().join("manifest.json");
+            if manifest_path.exists() {
+                let bytes = std::fs::read(&manifest_path)?;
+                let manifest: BlobManifest = serde_json::from_slice(&bytes)?;
+                return Ok(Some(manifest));
             }
         }
         Ok(None)
     }
 
+    /// Returns `true` when every CSV part listed in `manifest` is already present
+    /// in the local blob cache.
+    fn all_parts_cached(&self, manifest: &BlobManifest) -> bool {
+        manifest
+            .blobs
+            .iter()
+            .filter(|b| b.blob_name.ends_with(".csv"))
+            .all(|b| self.local_path_for_blob(&b.blob_name).exists())
+    }
+
     /// Loads all billing part CSVs for the given month, using a local disk cache.
     ///
-    /// The manifest is always fetched from blob (it is small and detects when the
-    /// current-month export has been replaced).  Each CSV part is only downloaded
-    /// if it is not already present on disk under `./blob/{container}/{blob_name}`.
+    /// The manifest is fetched from blob storage so stale local copies are detected.
+    /// If blob storage is unreachable and all CSV parts are already cached on disk,
+    /// the most-recent local manifest is used as a fallback (with a warning log).
+    /// Each CSV part is only downloaded if it is not already present on disk under
+    /// `./blob/{container}/{blob_name}`.
     pub async fn load_bills_for_month(
         &self,
         year: u32,
@@ -366,7 +440,173 @@ fn days_in_month(year: u32, month: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_date_range, is_month_complete};
+    use super::{BlobManifest, ManifestBlob, ManifestRunInfo, is_date_range, is_month_complete};
+
+    fn make_manifest(end_date: &str, blobs: Vec<&str>) -> BlobManifest {
+        BlobManifest {
+            blobs: blobs
+                .into_iter()
+                .map(|name| ManifestBlob { blob_name: name.to_string() })
+                .collect(),
+            run_info: ManifestRunInfo { end_date: end_date.to_string() },
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // try_load_cached_manifest: reads the canonical manifest at date-range level
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn canonical_manifest_is_loaded_directly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (container, prefix) = ("billing", "myorg/costs");
+        let date_range = "20260501-20260531";
+        let end_date = "2026-05-20T00:00:00";
+
+        // Write the canonical manifest directly in the date-range directory
+        // (as fetch_manifest_from_blob now does).
+        let mut dr_dir = tmp.path().to_path_buf();
+        dr_dir.push("blob");
+        dr_dir.push(container);
+        for seg in prefix.split('/') {
+            if !seg.is_empty() { dr_dir.push(seg); }
+        }
+        dr_dir.push(date_range);
+        std::fs::create_dir_all(&dr_dir).unwrap();
+        let manifest_json = serde_json::json!({
+            "blobs": [{"blobName": "myorg/costs/20260501-20260531/run-abc/part_0.csv"}],
+            "runInfo": { "endDate": end_date }
+        });
+        std::fs::write(dr_dir.join("manifest.json"), manifest_json.to_string()).unwrap();
+
+        // Simulate try_load_cached_manifest logic.
+        let mut cache_base = tmp.path().to_path_buf();
+        cache_base.push("blob");
+        cache_base.push(container);
+        for seg in prefix.split('/') {
+            if !seg.is_empty() { cache_base.push(seg); }
+        }
+
+        let month_prefix = "202605";
+        let mut found_end: Option<String> = None;
+        for dr_entry in std::fs::read_dir(&cache_base).unwrap() {
+            let dr_entry = dr_entry.unwrap();
+            let dr_name = dr_entry.file_name();
+            let dr_name_str = dr_name.to_string_lossy();
+            if !dr_name_str.starts_with(month_prefix) || !is_date_range(&dr_name_str) {
+                continue;
+            }
+            let manifest_path = dr_entry.path().join("manifest.json");
+            if manifest_path.exists() {
+                let v: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+                found_end = Some(v["runInfo"]["endDate"].as_str().unwrap().to_string());
+            }
+        }
+
+        assert_eq!(found_end.as_deref(), Some(end_date));
+    }
+
+    /// Verifies that run-ID subdirectory manifests (old-style cache layout) are NOT
+    /// picked up by the new canonical-manifest logic — the canonical file must be
+    /// written directly in the date-range directory, not inside a run-ID subdir.
+    #[test]
+    fn run_id_manifest_not_returned_without_canonical() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (container, prefix) = ("billing", "myorg/costs");
+
+        // Write a manifest only inside a run-ID subdir (old layout, no canonical).
+        let mut run_dir = tmp.path().to_path_buf();
+        run_dir.extend(["blob", container]);
+        for seg in prefix.split('/') { if !seg.is_empty() { run_dir.push(seg); } }
+        run_dir.extend(["20260501-20260531", "run-abc"]);
+        std::fs::create_dir_all(&run_dir).unwrap();
+        std::fs::write(
+            run_dir.join("manifest.json"),
+            r#"{"blobs":[],"runInfo":{"endDate":"2026-05-20T00:00:00"}}"#,
+        ).unwrap();
+
+        // The canonical path (date-range dir, no run-ID) should NOT exist.
+        let canonical = run_dir.parent().unwrap().join("manifest.json");
+        assert!(!canonical.exists(), "canonical manifest should not exist yet");
+
+        // Simulate try_load_cached_manifest: it only checks date_range/manifest.json.
+        let mut cache_base = tmp.path().to_path_buf();
+        cache_base.extend(["blob", container]);
+        for seg in prefix.split('/') { if !seg.is_empty() { cache_base.push(seg); } }
+
+        let mut found = false;
+        for dr_entry in std::fs::read_dir(&cache_base).unwrap() {
+            let dr_entry = dr_entry.unwrap();
+            let dr_name = dr_entry.file_name();
+            let s = dr_name.to_string_lossy();
+            if !s.starts_with("202605") || !is_date_range(&s) { continue; }
+            if dr_entry.path().join("manifest.json").exists() {
+                found = true;
+            }
+        }
+
+        assert!(!found, "should not find a manifest when only run-ID copy exists");
+    }
+
+    // ---------------------------------------------------------------------------
+    // all_parts_cached helper logic
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn all_parts_cached_true_when_files_exist() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest = make_manifest(
+            "2026-05-20T00:00:00",
+            vec!["myorg/costs/20260501-20260531/run/part_0.csv",
+                 "myorg/costs/20260501-20260531/run/part_1.csv"],
+        );
+        // Write both CSV files into blob/billing/...
+        for blob in &manifest.blobs {
+            let mut p = tmp.path().to_path_buf();
+            p.push("blob");
+            p.push("billing");
+            for seg in blob.blob_name.split('/') {
+                if !seg.is_empty() { p.push(seg); }
+            }
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, b"x").unwrap();
+        }
+        let all_present = manifest.blobs.iter().filter(|b| b.blob_name.ends_with(".csv")).all(|b| {
+            let mut p = tmp.path().to_path_buf();
+            p.push("blob"); p.push("billing");
+            for seg in b.blob_name.split('/') { if !seg.is_empty() { p.push(seg); } }
+            p.exists()
+        });
+        assert!(all_present);
+    }
+
+    #[test]
+    fn all_parts_cached_false_when_file_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest = make_manifest(
+            "2026-05-20T00:00:00",
+            vec!["myorg/costs/20260501-20260531/run/part_0.csv",
+                 "myorg/costs/20260501-20260531/run/part_1.csv"],
+        );
+        // Only write the first CSV.
+        {
+            let mut p = tmp.path().to_path_buf();
+            p.push("blob"); p.push("billing");
+            for seg in manifest.blobs[0].blob_name.split('/') {
+                if !seg.is_empty() { p.push(seg); }
+            }
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, b"x").unwrap();
+        }
+        let all_present = manifest.blobs.iter().filter(|b| b.blob_name.ends_with(".csv")).all(|b| {
+            let mut p = tmp.path().to_path_buf();
+            p.push("blob"); p.push("billing");
+            for seg in b.blob_name.split('/') { if !seg.is_empty() { p.push(seg); } }
+            p.exists()
+        });
+        assert!(!all_present);
+    }
 
     #[test]
     fn valid_date_range() {

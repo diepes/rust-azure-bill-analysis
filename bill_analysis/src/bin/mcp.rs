@@ -966,7 +966,7 @@ fn handle_tools_list(req: &RpcRequest) -> RpcResponse {
                 },
                 {
                     "name": "get_monthly_cost",
-                    "description": "Get the total Azure cost in USD for a given billing month. Optionally filter by resource group or resource name using a case-insensitive substring match — e.g. resource_group='prod' will match 'my-prod-eastus-rg'. Returns the total cost, row count, and top contributors.",
+                    "description": "Get the total Azure cost in USD for a given billing month. All filters are case-insensitive regexes — plain strings match as substrings, but anchors, alternation (prod|staging), and wildcards (ingenie.*) are all valid. Returns the total cost, row count, and top contributors.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -976,11 +976,15 @@ fn handle_tools_list(req: &RpcRequest) -> RpcResponse {
                             },
                             "resource_group": {
                                 "type": "string",
-                                "description": "Case-insensitive substring to match against resource group names. Omit to include all resource groups."
+                                "description": "Case-insensitive regex matched against resource group names. Plain strings work as substring filters, e.g. 'prod' matches 'my-prod-eastus-rg'. Omit to include all resource groups."
                             },
                             "resource_name": {
                                 "type": "string",
-                                "description": "Case-insensitive substring to match against resource names. Omit to include all resources."
+                                "description": "Case-insensitive regex matched against resource names. Supports alternation, e.g. 'ingenie|eroad'. Omit to include all resources."
+                            },
+                            "tag_filter": {
+                                "type": "string",
+                                "description": "Case-insensitive regex matched against the full tag string, e.g. 'environment.*prod' matches resources tagged environment=prod. Tag string format: '\"Key\": \"Value\",\"Key2\": \"Value2\"'. Omit to include all resources regardless of tags."
                             }
                         },
                         "required": ["month"]
@@ -988,7 +992,7 @@ fn handle_tools_list(req: &RpcRequest) -> RpcResponse {
                 },
                 {
                     "name": "get_daily_cost",
-                    "description": "Get the total Azure cost in USD for a specific calendar date. The billing CSV uses UTC calendar dates. Optionally filter by resource group or resource name (case-insensitive substring match).",
+                    "description": "Get the total Azure cost in USD for a specific calendar date. All filters are case-insensitive regexes — plain strings match as substrings, anchors and alternation are also valid. The billing CSV uses UTC calendar dates.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -998,11 +1002,15 @@ fn handle_tools_list(req: &RpcRequest) -> RpcResponse {
                             },
                             "resource_group": {
                                 "type": "string",
-                                "description": "Case-insensitive substring to match against resource group names."
+                                "description": "Case-insensitive regex matched against resource group names. Omit to include all resource groups."
                             },
                             "resource_name": {
                                 "type": "string",
-                                "description": "Case-insensitive substring to match against resource names."
+                                "description": "Case-insensitive regex matched against resource names. Supports alternation, e.g. 'ingenie|eroad'. Omit to include all resources."
+                            },
+                            "tag_filter": {
+                                "type": "string",
+                                "description": "Case-insensitive regex matched against the full tag string, e.g. 'environment.*prod'. Omit to include all resources regardless of tags."
                             }
                         },
                         "required": ["date"]
@@ -1093,10 +1101,14 @@ async fn tool_get_monthly_cost(
         .get("resource_name")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    let tag_filter = args
+        .get("tag_filter")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     let (year, mon) = parse_year_month(month)?;
     let bills = load_or_cache(state, year, mon, month).await?;
-    let result = compute_cost(&bills, rg_filter, name_filter, None);
+    let result = compute_cost(&bills, rg_filter, name_filter, tag_filter, None)?;
 
     Ok(serde_json::to_string_pretty(&json!({
         "cost_usd": round2(result.cost_usd),
@@ -1128,12 +1140,16 @@ async fn tool_get_daily_cost(
         .get("resource_name")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    let tag_filter = args
+        .get("tag_filter")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     let (year, mon, _day) = parse_date(date_str)?;
     let month_str = format!("{:04}-{:02}", year, mon);
 
     let bills = load_or_cache(state, year, mon, &month_str).await?;
-    let result = compute_cost(&bills, rg_filter, name_filter, Some(date_str));
+    let result = compute_cost(&bills, rg_filter, name_filter, tag_filter, Some(date_str))?;
 
     Ok(serde_json::to_string_pretty(&json!({
         "cost_usd": round2(result.cost_usd),
@@ -1161,11 +1177,29 @@ struct ResourceEntry {
     row_count: usize,
 }
 
+/// Compile a non-empty pattern into a case-insensitive regex, or return `None`
+/// for an empty string (meaning "match all").  Returns a tool-level error for
+/// invalid patterns so the LLM can self-correct.
+fn compile_filter(pattern: &str) -> Result<Option<regex::Regex>, String> {
+    if pattern.is_empty() {
+        return Ok(None);
+    }
+    regex::Regex::new(&format!("(?i){pattern}"))
+        .map(Some)
+        .map_err(|e| format!("Invalid filter regex '{pattern}': {e}"))
+}
+
 /// Compute total USD cost across all matching bill entries.
 ///
-/// Filters are case-insensitive substring matches. All strings were lowercased
-/// on ingest (bills are always parsed with `case_sensitive = false`), so we
-/// just lowercase the filter inputs and use `contains`.
+/// All three filters are **case-insensitive regexes** — plain strings like
+/// `"prod"` or `"ingenie"` work as substring matches; anchors, alternation
+/// (`prod|staging`), and wildcards (`ingenie.*`) are all valid.  Bills are
+/// stored lowercased on ingest so filters are effectively case-insensitive
+/// regardless of the pattern's own case.
+///
+/// `tag_filter` is matched against the full lowercased tag string from the CSV
+/// cell, e.g. `"environment": "prod","team": "platform"` — so
+/// `environment.*prod` matches that entry.
 ///
 /// `date_filter` — when `Some`, only entries whose `date` field equals the
 /// ISO date string (`YYYY-MM-DD`) are included.
@@ -1177,12 +1211,14 @@ fn compute_cost(
     bills: &Bills,
     rg_filter: &str,
     name_filter: &str,
+    tag_filter: &str,
     date_filter: Option<&str>,
-) -> CostResult {
+) -> Result<CostResult, String> {
     let t = Instant::now();
-    let rg_lower = rg_filter.to_lowercase();
-    let name_lower = name_filter.to_lowercase();
-    let group_by_name = !name_lower.is_empty();
+    let rg_re = compile_filter(rg_filter)?;
+    let name_re = compile_filter(name_filter)?;
+    let tag_re = compile_filter(tag_filter)?;
+    let group_by_name = name_re.is_some();
 
     let mut total_usd = 0.0f64;
     let mut row_count = 0usize;
@@ -1194,11 +1230,20 @@ fn compute_cost(
         {
             continue;
         }
-        if !rg_lower.is_empty() && !entry.resource_group.contains(rg_lower.as_str()) {
-            continue;
+        if let Some(re) = &rg_re {
+            if !re.is_match(&entry.resource_group) {
+                continue;
+            }
         }
-        if !name_lower.is_empty() && !entry.resource_name.contains(name_lower.as_str()) {
-            continue;
+        if let Some(re) = &name_re {
+            if !re.is_match(&entry.resource_name) {
+                continue;
+            }
+        }
+        if let Some(re) = &tag_re {
+            if !re.is_match(&entry.tags.value) {
+                continue;
+            }
         }
 
         let cost = entry.cost_usd.0;
@@ -1235,11 +1280,11 @@ fn compute_cost(
         row_count,
         t.elapsed().as_secs_f64() * 1000.0
     );
-    CostResult {
+    Ok(CostResult {
         cost_usd: total_usd,
         row_count,
         matched_resources,
-    }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1322,7 +1367,11 @@ async fn load_or_cache(
         let bills = blob
             .load_bills_for_month(year, mon, &filter_opts)
             .await
-            .map_err(|e| format!("Blob load failed for '{month_str}': {e}"))?;
+            .map_err(|e| {
+                let msg = format!("Blob load failed for '{month_str}': {e}");
+                log::error!("[mcp] {msg}");
+                msg
+            })?;
         log::info!(
             "[mcp] loaded {month_str} from blob ({} rows) in {:.3}s",
             bills.len(),
@@ -1426,7 +1475,7 @@ mod tests {
             make_entry("rg-b", "vm-2", 20.0, "2026-04-01"),
             make_entry("rg-a", "vm-3", 5.0, "2026-04-02"),
         ]);
-        let r = compute_cost(&bills, "", "", None);
+        let r = compute_cost(&bills, "", "", "", None).unwrap();
         assert_eq!(r.row_count, 3);
         assert!((r.cost_usd - 35.0).abs() < 0.001);
     }
@@ -1439,7 +1488,7 @@ mod tests {
             make_entry("prod-east", "vm-3", 5.0, "2026-04-01"),
         ]);
         // "prod" should match "my-prod-rg" and "prod-east" but not "dev-rg"
-        let r = compute_cost(&bills, "prod", "", None);
+        let r = compute_cost(&bills, "prod", "", "", None).unwrap();
         assert_eq!(r.row_count, 2);
         assert!((r.cost_usd - 15.0).abs() < 0.001);
     }
@@ -1451,7 +1500,7 @@ mod tests {
             make_entry("rg-b", "sql-prod-2", 20.0, "2026-04-01"),
             make_entry("rg-a", "vm-other", 5.0, "2026-04-01"),
         ]);
-        let r = compute_cost(&bills, "", "sql", None);
+        let r = compute_cost(&bills, "", "sql", "", None).unwrap();
         assert_eq!(r.row_count, 2);
         assert!((r.cost_usd - 30.0).abs() < 0.001);
         // matched_resources should be keyed by resource_name, not rg
@@ -1466,7 +1515,7 @@ mod tests {
             make_entry("rg-a", "vm-2", 20.0, "2026-04-02"),
             make_entry("rg-a", "vm-3", 5.0, "2026-04-01"),
         ]);
-        let r = compute_cost(&bills, "", "", Some("2026-04-01"));
+        let r = compute_cost(&bills, "", "", "", Some("2026-04-01")).unwrap();
         assert_eq!(r.row_count, 2);
         assert!((r.cost_usd - 15.0).abs() < 0.001);
     }
@@ -1478,7 +1527,7 @@ mod tests {
             make_entry("dev-rg", "vm-2", 20.0, "2026-04-01"),
             make_entry("prod-rg", "vm-3", 5.0, "2026-04-02"),
         ]);
-        let r = compute_cost(&bills, "prod", "", Some("2026-04-01"));
+        let r = compute_cost(&bills, "prod", "", "", Some("2026-04-01")).unwrap();
         assert_eq!(r.row_count, 1);
         assert!((r.cost_usd - 10.0).abs() < 0.001);
     }
@@ -1490,7 +1539,7 @@ mod tests {
             .map(|i| make_entry(&format!("rg-{i:02}"), "vm", i as f64, "2026-04-01"))
             .collect();
         let bills = make_bills(entries);
-        let r = compute_cost(&bills, "", "", None);
+        let r = compute_cost(&bills, "", "", "", None).unwrap();
         assert_eq!(r.matched_resources.len(), 10);
         // top entry should be the most expensive (rg-14 = $14)
         assert_eq!(r.matched_resources[0].name, "rg-14");
@@ -1499,7 +1548,7 @@ mod tests {
     #[test]
     fn compute_cost_no_match_returns_zero() {
         let bills = make_bills(vec![make_entry("rg-a", "vm-1", 10.0, "2026-04-01")]);
-        let r = compute_cost(&bills, "nonexistent", "", None);
+        let r = compute_cost(&bills, "nonexistent", "", "", None).unwrap();
         assert_eq!(r.row_count, 0);
         assert_eq!(r.cost_usd, 0.0);
         assert!(r.matched_resources.is_empty());
@@ -1578,13 +1627,16 @@ async fn main() {
                             log::debug!("[mcp]   {f}");
                         }
                     }
-                    Err(e) => log::warn!("[mcp] WARNING: blob listing failed: {e}"),
+                    Err(e) => {
+                        log::error!("[mcp] ✗ blob connectivity check failed: {e}");
+                        std::process::exit(1);
+                    }
                 }
                 Some(Arc::new(source))
             }
             Err(e) => {
-                log::warn!("[mcp] WARNING: blob client init failed: {e}");
-                None
+                log::error!("[mcp] ✗ blob client init failed: {e}");
+                std::process::exit(1);
             }
         }
     } else {
