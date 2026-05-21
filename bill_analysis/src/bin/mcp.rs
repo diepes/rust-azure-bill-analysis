@@ -23,7 +23,13 @@ use axum::{
     routing::{get, post},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use bill_analysis::{bills::Bills, blob_source::{BlobSource, BlobSourceConfig}, cmd_parse::FilterOpts, find_files};
+use bill_analysis::{
+    bills::{
+        cost_query::{query_cost, CostQuery, round2},
+        repository::BillRepository,
+    },
+    blob_source::{BlobSource, BlobSourceConfig},
+};
 use clap::Parser;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use rand::Rng;
@@ -64,8 +70,6 @@ struct Args {
 // ---------------------------------------------------------------------------
 // Shared state
 // ---------------------------------------------------------------------------
-
-type BillCache = Arc<RwLock<HashMap<(u32, u32), Arc<Bills>>>>;
 
 // ---------------------------------------------------------------------------
 // Entra OAuth configuration
@@ -189,10 +193,7 @@ struct CallerIdentity {
 
 #[derive(Clone)]
 struct AppState {
-    cache: BillCache,
-    data_dir: PathBuf,
-    /// None when blob env vars are absent.
-    blob: Option<Arc<BlobSource>>,
+    repo: Arc<BillRepository>,
     /// None when --no-auth is set; all MCP callers are trusted.
     entra: Option<EntraConfig>,
     pkce_store: PkceStateStore,
@@ -1057,26 +1058,7 @@ async fn handle_tools_call(req: &RpcRequest, state: &AppState) -> RpcResponse {
 // ---------------------------------------------------------------------------
 
 async fn tool_list_available_months(state: &AppState) -> Result<String, String> {
-    let mut months: std::collections::HashSet<String> =
-        find_files::list_bill_months(&state.data_dir).into_iter().collect();
-
-    if let Some(blob) = &state.blob {
-        match blob.list_date_range_folders().await {
-            Ok(date_ranges) => {
-                for dr in date_ranges {
-                    // Convert "YYYYMMDD-YYYYMMDD" → "YYYY-MM" using the start date.
-                    if dr.len() >= 6 {
-                        let ym = format!("{}-{}", &dr[..4], &dr[4..6]);
-                        months.insert(ym);
-                    }
-                }
-            }
-            Err(e) => log::warn!("[mcp] WARNING: blob list_date_range_folders failed: {e}"),
-        }
-    }
-
-    let mut months: Vec<String> = months.into_iter().collect();
-    months.sort();
+    let months = state.repo.list_months_including_blob().await;
     Ok(serde_json::to_string_pretty(&json!({ "months": months })).unwrap())
 }
 
@@ -1107,14 +1089,19 @@ async fn tool_get_monthly_cost(
         .unwrap_or("");
 
     let (year, mon) = parse_year_month(month)?;
-    let bills = load_or_cache(state, year, mon, month).await?;
-    let result = compute_cost(&bills, rg_filter, name_filter, tag_filter, None)?;
+    let bills = state.repo.get(year, mon).await?;
+    let result = query_cost(&bills, &CostQuery {
+        rg_filter: rg_filter.to_string(),
+        name_filter: name_filter.to_string(),
+        tag_filter: tag_filter.to_string(),
+        date_filter: None,
+    })?;
 
     Ok(serde_json::to_string_pretty(&json!({
         "cost_usd": round2(result.cost_usd),
         "row_count": result.row_count,
         "period": month,
-        "matched_resources": result.matched_resources,
+        "top_contributors": result.top_contributors,
     }))
     .unwrap())
 }
@@ -1146,149 +1133,26 @@ async fn tool_get_daily_cost(
         .unwrap_or("");
 
     let (year, mon, _day) = parse_date(date_str)?;
-    let month_str = format!("{:04}-{:02}", year, mon);
 
-    let bills = load_or_cache(state, year, mon, &month_str).await?;
-    let result = compute_cost(&bills, rg_filter, name_filter, tag_filter, Some(date_str))?;
+    let bills = state.repo.get(year, mon).await?;
+    let result = query_cost(&bills, &CostQuery {
+        rg_filter: rg_filter.to_string(),
+        name_filter: name_filter.to_string(),
+        tag_filter: tag_filter.to_string(),
+        date_filter: Some(date_str.to_string()),
+    })?;
 
     Ok(serde_json::to_string_pretty(&json!({
         "cost_usd": round2(result.cost_usd),
         "row_count": result.row_count,
         "date": date_str,
-        "matched_resources": result.matched_resources,
+        "top_contributors": result.top_contributors,
     }))
     .unwrap())
 }
 
 // ---------------------------------------------------------------------------
-// Cost computation — iterates bill entries directly for performance
-// ---------------------------------------------------------------------------
-
-struct CostResult {
-    cost_usd: f64,
-    row_count: usize,
-    matched_resources: Vec<ResourceEntry>,
-}
-
-#[derive(Serialize)]
-struct ResourceEntry {
-    name: String,
-    cost_usd: f64,
-    row_count: usize,
-}
-
-/// Compile a non-empty pattern into a case-insensitive regex, or return `None`
-/// for an empty string (meaning "match all").  Returns a tool-level error for
-/// invalid patterns so the LLM can self-correct.
-fn compile_filter(pattern: &str) -> Result<Option<regex::Regex>, String> {
-    if pattern.is_empty() {
-        return Ok(None);
-    }
-    regex::Regex::new(&format!("(?i){pattern}"))
-        .map(Some)
-        .map_err(|e| format!("Invalid filter regex '{pattern}': {e}"))
-}
-
-/// Compute total USD cost across all matching bill entries.
-///
-/// All three filters are **case-insensitive regexes** — plain strings like
-/// `"prod"` or `"ingenie"` work as substring matches; anchors, alternation
-/// (`prod|staging`), and wildcards (`ingenie.*`) are all valid.  Bills are
-/// stored lowercased on ingest so filters are effectively case-insensitive
-/// regardless of the pattern's own case.
-///
-/// `tag_filter` is matched against the full lowercased tag string from the CSV
-/// cell, e.g. `"environment": "prod","team": "platform"` — so
-/// `environment.*prod` matches that entry.
-///
-/// `date_filter` — when `Some`, only entries whose `date` field equals the
-/// ISO date string (`YYYY-MM-DD`) are included.
-///
-/// When `name_filter` is set, `matched_resources` lists individual resources
-/// (ResourceName); otherwise it lists resource groups (ResourceGroup), top-10
-/// by cost.
-fn compute_cost(
-    bills: &Bills,
-    rg_filter: &str,
-    name_filter: &str,
-    tag_filter: &str,
-    date_filter: Option<&str>,
-) -> Result<CostResult, String> {
-    let t = Instant::now();
-    let rg_re = compile_filter(rg_filter)?;
-    let name_re = compile_filter(name_filter)?;
-    let tag_re = compile_filter(tag_filter)?;
-    let group_by_name = name_re.is_some();
-
-    let mut total_usd = 0.0f64;
-    let mut row_count = 0usize;
-    let mut by_key: HashMap<String, (f64, usize)> = HashMap::new();
-
-    for entry in &bills.bills {
-        if let Some(date) = date_filter
-            && entry.date != date
-        {
-            continue;
-        }
-        if let Some(re) = &rg_re {
-            if !re.is_match(&entry.resource_group) {
-                continue;
-            }
-        }
-        if let Some(re) = &name_re {
-            if !re.is_match(&entry.resource_name) {
-                continue;
-            }
-        }
-        if let Some(re) = &tag_re {
-            if !re.is_match(&entry.tags.value) {
-                continue;
-            }
-        }
-
-        let cost = entry.cost_usd.0;
-        total_usd += cost;
-        row_count += 1;
-
-        let key = if group_by_name {
-            entry.resource_name.clone()
-        } else {
-            entry.resource_group.clone()
-        };
-        let e = by_key.entry(key).or_insert((0.0, 0));
-        e.0 += cost;
-        e.1 += 1;
-    }
-
-    // Sort by cost descending, keep top 10
-    let mut entries: Vec<(String, f64, usize)> =
-        by_key.into_iter().map(|(k, (c, n))| (k, c, n)).collect();
-    entries.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    entries.truncate(10);
-
-    let matched_resources = entries
-        .into_iter()
-        .map(|(name, cost_usd, row_count)| ResourceEntry {
-            name,
-            cost_usd: round2(cost_usd),
-            row_count,
-        })
-        .collect();
-
-    log::debug!(
-        "[mcp] compute_cost {} rows in {:.1}ms",
-        row_count,
-        t.elapsed().as_secs_f64() * 1000.0
-    );
-    Ok(CostResult {
-        cost_usd: total_usd,
-        row_count,
-        matched_resources,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Cache helpers
+// Parse helpers
 // ---------------------------------------------------------------------------
 
 fn parse_year_month(s: &str) -> Result<(u32, u32), String> {
@@ -1321,85 +1185,6 @@ fn parse_date(s: &str) -> Result<(u32, u32, u32), String> {
     Ok((year, mon, day))
 }
 
-async fn load_or_cache(
-    state: &AppState,
-    year: u32,
-    mon: u32,
-    month_str: &str,
-) -> Result<Arc<Bills>, String> {
-    // Fast path: read lock
-    {
-        let cache = state.cache.read().await;
-        if let Some(bills) = cache.get(&(year, mon)) {
-            log::debug!("[mcp] cache HIT  {month_str}");
-            return Ok(Arc::clone(bills));
-        }
-    }
-
-    log::debug!("[mcp] cache MISS {month_str} — loading...");
-
-    // Try local CSV first.
-    if let Some(csv_path) = find_files::find_bill_csv(&state.data_dir, month_str) {
-        let load_start = Instant::now();
-        let mut bills = Bills::default();
-        let filter_opts = FilterOpts { case_sensitive: false };
-        bills
-            .parse_csv(&csv_path, &filter_opts)
-            .map_err(|e| format!("Failed to parse '{:?}': {}", csv_path, e))?;
-        log::info!(
-            "[mcp] loaded {month_str} from local ({} rows) in {:.3}s",
-            bills.len(),
-            load_start.elapsed().as_secs_f64()
-        );
-        let bills = Arc::new(bills);
-        {
-            let mut cache = state.cache.write().await;
-            cache.insert((year, mon), Arc::clone(&bills));
-        }
-        return Ok(bills);
-    }
-
-    // Fall back to blob storage.
-    if let Some(blob) = &state.blob {
-        log::debug!("[mcp] trying blob source for {month_str}");
-        let load_start = Instant::now();
-        let filter_opts = FilterOpts { case_sensitive: false };
-        let bills = blob
-            .load_bills_for_month(year, mon, &filter_opts)
-            .await
-            .map_err(|e| {
-                let msg = format!("Blob load failed for '{month_str}': {e}");
-                log::error!("[mcp] {msg}");
-                msg
-            })?;
-        log::info!(
-            "[mcp] loaded {month_str} from blob ({} rows) in {:.3}s",
-            bills.len(),
-            load_start.elapsed().as_secs_f64()
-        );
-        let bills = Arc::new(bills);
-        {
-            let mut cache = state.cache.write().await;
-            cache.insert((year, mon), Arc::clone(&bills));
-        }
-        return Ok(bills);
-    }
-
-    Err(format!(
-        "No billing file found for '{}' in {:?} and no blob source configured",
-        month_str, state.data_dir
-    ))
-}
-
-// ---------------------------------------------------------------------------
-// Utilities
-// ---------------------------------------------------------------------------
-
-/// Round to 2 decimal places for JSON output.
-fn round2(v: f64) -> f64 {
-    (v * 100.0).round() / 100.0
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1407,24 +1192,6 @@ fn round2(v: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bill_analysis::bills::bill_entry::BillEntry;
-    use bill_analysis::money::Usd;
-
-    fn make_entry(resource_group: &str, resource_name: &str, cost: f64, date: &str) -> BillEntry {
-        BillEntry {
-            resource_group: resource_group.to_string(),
-            resource_name: resource_name.to_string(),
-            cost_usd: Usd(cost),
-            date: date.to_string(), // ISO YYYY-MM-DD (as normalised on ingest)
-            ..BillEntry::default()
-        }
-    }
-
-    fn make_bills(entries: Vec<BillEntry>) -> Bills {
-        let mut b = Bills::default();
-        b.bills = entries;
-        b
-    }
 
     // --- parse_year_month ---
 
@@ -1454,104 +1221,6 @@ mod tests {
         assert!(parse_date("2026-04").is_err()); // only 2 parts
         assert!(parse_date("20260407").is_err()); // no separators
         assert!(parse_date("abc-def-ghi").is_err());
-    }
-
-    // --- round2 ---
-
-    #[test]
-    fn round2_basic() {
-        assert_eq!(round2(1.234), 1.23);
-        assert_eq!(round2(1.235), 1.24);
-        assert_eq!(round2(0.0), 0.0);
-        assert_eq!(round2(100.0), 100.0);
-    }
-
-    // --- compute_cost ---
-
-    #[test]
-    fn compute_cost_no_filter_totals_all_rows() {
-        let bills = make_bills(vec![
-            make_entry("rg-a", "vm-1", 10.0, "2026-04-01"),
-            make_entry("rg-b", "vm-2", 20.0, "2026-04-01"),
-            make_entry("rg-a", "vm-3", 5.0, "2026-04-02"),
-        ]);
-        let r = compute_cost(&bills, "", "", "", None).unwrap();
-        assert_eq!(r.row_count, 3);
-        assert!((r.cost_usd - 35.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn compute_cost_rg_filter_substring_match() {
-        let bills = make_bills(vec![
-            make_entry("my-prod-rg", "vm-1", 10.0, "2026-04-01"),
-            make_entry("dev-rg", "vm-2", 99.0, "2026-04-01"),
-            make_entry("prod-east", "vm-3", 5.0, "2026-04-01"),
-        ]);
-        // "prod" should match "my-prod-rg" and "prod-east" but not "dev-rg"
-        let r = compute_cost(&bills, "prod", "", "", None).unwrap();
-        assert_eq!(r.row_count, 2);
-        assert!((r.cost_usd - 15.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn compute_cost_name_filter_groups_by_resource_name() {
-        let bills = make_bills(vec![
-            make_entry("rg-a", "sql-prod-1", 10.0, "2026-04-01"),
-            make_entry("rg-b", "sql-prod-2", 20.0, "2026-04-01"),
-            make_entry("rg-a", "vm-other", 5.0, "2026-04-01"),
-        ]);
-        let r = compute_cost(&bills, "", "sql", "", None).unwrap();
-        assert_eq!(r.row_count, 2);
-        assert!((r.cost_usd - 30.0).abs() < 0.001);
-        // matched_resources should be keyed by resource_name, not rg
-        assert!(r.matched_resources.iter().any(|e| e.name == "sql-prod-1"));
-        assert!(r.matched_resources.iter().any(|e| e.name == "sql-prod-2"));
-    }
-
-    #[test]
-    fn compute_cost_date_filter() {
-        let bills = make_bills(vec![
-            make_entry("rg-a", "vm-1", 10.0, "2026-04-01"),
-            make_entry("rg-a", "vm-2", 20.0, "2026-04-02"),
-            make_entry("rg-a", "vm-3", 5.0, "2026-04-01"),
-        ]);
-        let r = compute_cost(&bills, "", "", "", Some("2026-04-01")).unwrap();
-        assert_eq!(r.row_count, 2);
-        assert!((r.cost_usd - 15.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn compute_cost_combined_rg_and_date_filter() {
-        let bills = make_bills(vec![
-            make_entry("prod-rg", "vm-1", 10.0, "2026-04-01"),
-            make_entry("dev-rg", "vm-2", 20.0, "2026-04-01"),
-            make_entry("prod-rg", "vm-3", 5.0, "2026-04-02"),
-        ]);
-        let r = compute_cost(&bills, "prod", "", "", Some("2026-04-01")).unwrap();
-        assert_eq!(r.row_count, 1);
-        assert!((r.cost_usd - 10.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn compute_cost_top10_truncation() {
-        // 15 distinct resource groups — result should only return 10
-        let entries: Vec<BillEntry> = (0..15)
-            .map(|i| make_entry(&format!("rg-{i:02}"), "vm", i as f64, "2026-04-01"))
-            .collect();
-        let bills = make_bills(entries);
-        let r = compute_cost(&bills, "", "", "", None).unwrap();
-        assert_eq!(r.matched_resources.len(), 10);
-        // top entry should be the most expensive (rg-14 = $14)
-        assert_eq!(r.matched_resources[0].name, "rg-14");
-    }
-
-    #[test]
-    fn compute_cost_no_match_returns_zero() {
-        let bills = make_bills(vec![make_entry("rg-a", "vm-1", 10.0, "2026-04-01")]);
-        let r = compute_cost(&bills, "nonexistent", "", "", None).unwrap();
-        assert_eq!(r.row_count, 0);
-        assert_eq!(r.cost_usd, 0.0);
-        assert!(r.matched_resources.is_empty());
     }
 }
 
@@ -1644,9 +1313,7 @@ async fn main() {
     };
 
     let state = AppState {
-        cache: Arc::new(RwLock::new(HashMap::new())),
-        data_dir: args.data_dir.clone(),
-        blob: blob_source,
+        repo: Arc::new(BillRepository::new(args.data_dir.clone(), blob_source)),
         entra,
         pkce_store: Arc::new(RwLock::new(HashMap::new())),
         temp_codes: Arc::new(RwLock::new(HashMap::new())),

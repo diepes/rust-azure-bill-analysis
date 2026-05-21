@@ -3,6 +3,9 @@
 pub mod bill_filter;
 pub use bill_filter::BillFilter;
 
+pub mod cost_query;
+pub mod repository;
+
 pub mod bill_entry;
 pub mod bills_impl_basic;
 pub mod bills_impl_cost_by_any;
