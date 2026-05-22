@@ -1,6 +1,35 @@
 use serde::Serialize;
+use std::collections::HashMap;
 
 use crate::bills::Bills;
+
+// ---------------------------------------------------------------------------
+// resource_type extraction
+// ---------------------------------------------------------------------------
+
+/// Extract the Azure resource type from an ARM resource ID.
+///
+/// ARM resource IDs follow the pattern:
+/// `/subscriptions/{id}/resourceGroups/{rg}/providers/{Namespace}/{type}/{name}`
+///
+/// Returns `{namespace}/{type}` lowercased, e.g. `microsoft.compute/disks`.
+/// Returns an empty string if the resource_id doesn't contain a `providers/` segment.
+pub fn extract_resource_type(resource_id: &str) -> String {
+    let lower = resource_id.to_lowercase();
+    // Find "providers/" and take the two path segments after it.
+    if let Some(pos) = lower.find("/providers/") {
+        let after = &lower[pos + "/providers/".len()..];
+        let parts: Vec<&str> = after.splitn(4, '/').collect();
+        if parts.len() >= 2 {
+            return format!("{}/{}", parts[0], parts[1]);
+        }
+    }
+    String::new()
+}
+
+// ---------------------------------------------------------------------------
+// CostQuery — existing aggregated-cost query
+// ---------------------------------------------------------------------------
 
 /// Filters for [`query_cost`]. All string fields are case-insensitive regex
 /// patterns; an empty string means "match all".
@@ -55,7 +84,6 @@ pub fn round2(v: f64) -> f64 {
 /// otherwise by `resource_group`. At most 10 contributors are returned, sorted
 /// by cost descending.
 pub fn query_cost(bills: &Bills, query: &CostQuery) -> Result<CostSummary, String> {
-    use std::collections::HashMap;
     use std::time::Instant;
 
     let t = Instant::now();
@@ -126,6 +154,152 @@ pub fn query_cost(bills: &Bills, query: &CostQuery) -> Result<CostSummary, Strin
                 row_count,
             })
             .collect(),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// ResourceSearchQuery — per-resource detailed search
+// ---------------------------------------------------------------------------
+
+/// Filters for [`search_resources`]. All string fields are case-insensitive
+/// regex patterns; an empty string means "match all".
+#[derive(Default)]
+pub struct ResourceSearchQuery {
+    pub rg_filter: String,
+    pub name_filter: String,
+    pub tag_filter: String,
+    pub meter_category_filter: String,
+    pub subscription_filter: String,
+    /// Matched against the resource type extracted from `resource_id`,
+    /// e.g. `"publicipaddresses"` or `"microsoft.compute/disks"`.
+    pub resource_type_filter: String,
+    /// Maximum number of results to return (default 50).
+    pub limit: Option<usize>,
+}
+
+/// One resource row in [`ResourceSearchResult`].
+#[derive(Serialize)]
+pub struct ResourceRow {
+    pub resource_name: String,
+    pub resource_group: String,
+    pub subscription_name: String,
+    pub meter_category: String,
+    pub resource_type: String,
+    pub total_cost_usd: f64,
+    pub charge_rows: usize,
+}
+
+/// Result returned by [`search_resources`].
+pub struct ResourceSearchResult {
+    /// Total unique resources matched (before limit).
+    pub total_resources: usize,
+    /// Summed cost of all matched resources (before limit).
+    pub total_cost_usd: f64,
+    /// Up to `limit` resources, sorted by `total_cost_usd` descending.
+    pub resources: Vec<ResourceRow>,
+}
+
+/// Search for individual resources, returning one aggregated row per unique
+/// `(resource_name, resource_group)` combination. Supports filtering by
+/// `meter_category`, `subscription`, and `resource_type` in addition to the
+/// filters available on [`query_cost`].
+pub fn search_resources(
+    bills: &Bills,
+    query: &ResourceSearchQuery,
+) -> Result<ResourceSearchResult, String> {
+    use std::time::Instant;
+
+    let t = Instant::now();
+    let rg_re = compile_filter(&query.rg_filter)?;
+    let name_re = compile_filter(&query.name_filter)?;
+    let tag_re = compile_filter(&query.tag_filter)?;
+    let cat_re = compile_filter(&query.meter_category_filter)?;
+    let sub_re = compile_filter(&query.subscription_filter)?;
+    let type_re = compile_filter(&query.resource_type_filter)?;
+    let limit = query.limit.unwrap_or(50);
+
+    // Key: (resource_name, resource_group) → (subscription_name, meter_category, resource_type, cost, rows)
+    #[derive(Default)]
+    struct Acc {
+        subscription_name: String,
+        meter_category: String,
+        resource_type: String,
+        cost: f64,
+        rows: usize,
+    }
+    let mut by_resource: HashMap<(String, String), Acc> = HashMap::new();
+
+    for entry in &bills.bills {
+        if let Some(re) = &rg_re {
+            if !re.is_match(&entry.resource_group) { continue; }
+        }
+        if let Some(re) = &name_re {
+            if !re.is_match(&entry.resource_name) { continue; }
+        }
+        if let Some(re) = &tag_re {
+            if !re.is_match(&entry.tags.value) { continue; }
+        }
+        if let Some(re) = &cat_re {
+            if !re.is_match(&entry.meter_category) { continue; }
+        }
+        if let Some(re) = &sub_re {
+            if !re.is_match(&entry.subscription_name) { continue; }
+        }
+
+        let rtype = extract_resource_type(&entry.resource_id);
+        if let Some(re) = &type_re {
+            if !re.is_match(&rtype) { continue; }
+        }
+
+        let key = (entry.resource_name.clone(), entry.resource_group.clone());
+        let acc = by_resource.entry(key).or_default();
+        acc.cost += entry.cost_usd.0;
+        acc.rows += 1;
+        if acc.subscription_name.is_empty() {
+            acc.subscription_name = entry.subscription_name.clone();
+        }
+        if acc.meter_category.is_empty() {
+            acc.meter_category = entry.meter_category.clone();
+        }
+        if acc.resource_type.is_empty() {
+            acc.resource_type = rtype;
+        }
+    }
+
+    let total_resources = by_resource.len();
+    let total_cost_usd: f64 = by_resource.values().map(|a| a.cost).sum();
+
+    let mut rows: Vec<ResourceRow> = by_resource
+        .into_iter()
+        .map(|((resource_name, resource_group), acc)| ResourceRow {
+            resource_name,
+            resource_group,
+            subscription_name: acc.subscription_name,
+            meter_category: acc.meter_category,
+            resource_type: acc.resource_type,
+            total_cost_usd: round2(acc.cost),
+            charge_rows: acc.rows,
+        })
+        .collect();
+
+    rows.sort_by(|a, b| {
+        b.total_cost_usd
+            .partial_cmp(&a.total_cost_usd)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    rows.truncate(limit);
+
+    log::debug!(
+        "[search_resources] {} resources ({} unique) in {:.1}ms",
+        total_resources,
+        rows.len(),
+        t.elapsed().as_secs_f64() * 1000.0
+    );
+
+    Ok(ResourceSearchResult {
+        total_resources,
+        total_cost_usd: round2(total_cost_usd),
+        resources: rows,
     })
 }
 
@@ -267,5 +441,134 @@ mod tests {
         assert_eq!(round2(1.235), 1.24);
         assert_eq!(round2(0.0), 0.0);
         assert_eq!(round2(100.0), 100.0);
+    }
+
+    // -----------------------------------------------------------------------
+    // extract_resource_type
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extract_resource_type_disk() {
+        let id = "/subscriptions/abc/resourceGroups/rg-prod/providers/Microsoft.Compute/disks/my-disk";
+        assert_eq!(extract_resource_type(id), "microsoft.compute/disks");
+    }
+
+    #[test]
+    fn extract_resource_type_public_ip() {
+        let id = "/subscriptions/abc/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/my-ip";
+        assert_eq!(extract_resource_type(id), "microsoft.network/publicipaddresses");
+    }
+
+    #[test]
+    fn extract_resource_type_empty_for_no_providers() {
+        assert_eq!(extract_resource_type(""), "");
+        assert_eq!(extract_resource_type("/subscriptions/abc"), "");
+    }
+
+    // -----------------------------------------------------------------------
+    // search_resources
+    // -----------------------------------------------------------------------
+
+    fn make_rich_entry(
+        rg: &str,
+        name: &str,
+        cost: f64,
+        meter_category: &str,
+        resource_id: &str,
+        subscription_name: &str,
+    ) -> BillEntry {
+        BillEntry {
+            resource_group: rg.to_string(),
+            resource_name: name.to_string(),
+            cost_usd: Usd(cost),
+            meter_category: meter_category.to_string(),
+            resource_id: resource_id.to_string(),
+            subscription_name: subscription_name.to_string(),
+            date: "2026-04-01".to_string(),
+            ..BillEntry::default()
+        }
+    }
+
+    #[test]
+    fn search_resources_returns_unique_resources() {
+        let ip_id = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/ip1";
+        let disk_id = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/disks/d1";
+        let bills = make_bills(vec![
+            make_rich_entry("rg-net", "ip-1", 5.0, "Virtual Network", ip_id, "sub-a"),
+            make_rich_entry("rg-net", "ip-1", 3.0, "Virtual Network", ip_id, "sub-a"),
+            make_rich_entry("rg-compute", "disk-1", 20.0, "Storage", disk_id, "sub-a"),
+        ]);
+        let r = search_resources(&bills, &ResourceSearchQuery::default()).unwrap();
+        assert_eq!(r.total_resources, 2);
+        assert!((r.total_cost_usd - 28.0).abs() < 0.01);
+        // ip-1 has two charge rows aggregated
+        let ip = r.resources.iter().find(|x| x.resource_name == "ip-1").unwrap();
+        assert_eq!(ip.charge_rows, 2);
+        assert!((ip.total_cost_usd - 8.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn search_resources_meter_category_filter() {
+        let disk_id = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/disks/d1";
+        let bills = make_bills(vec![
+            make_rich_entry("rg-net", "ip-1", 5.0, "Virtual Network", "", "sub-a"),
+            make_rich_entry("rg-compute", "disk-1", 20.0, "Storage", disk_id, "sub-a"),
+        ]);
+        let r = search_resources(
+            &bills,
+            &ResourceSearchQuery { meter_category_filter: "storage".into(), ..Default::default() },
+        )
+        .unwrap();
+        assert_eq!(r.total_resources, 1);
+        assert_eq!(r.resources[0].resource_name, "disk-1");
+        assert_eq!(r.resources[0].resource_type, "microsoft.compute/disks");
+    }
+
+    #[test]
+    fn search_resources_resource_type_filter() {
+        let ip_id = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/ip1";
+        let vm_id = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm1";
+        let bills = make_bills(vec![
+            make_rich_entry("rg-net", "my-ip", 5.0, "Virtual Network", ip_id, "sub-a"),
+            make_rich_entry("rg-compute", "my-vm", 50.0, "Virtual Machines", vm_id, "sub-a"),
+        ]);
+        let r = search_resources(
+            &bills,
+            &ResourceSearchQuery {
+                resource_type_filter: "publicipaddresses".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(r.total_resources, 1);
+        assert_eq!(r.resources[0].resource_name, "my-ip");
+    }
+
+    #[test]
+    fn search_resources_sorted_by_cost_descending() {
+        let bills = make_bills(vec![
+            make_rich_entry("rg", "cheap", 1.0, "cat", "", "sub"),
+            make_rich_entry("rg", "expensive", 100.0, "cat", "", "sub"),
+            make_rich_entry("rg", "mid", 10.0, "cat", "", "sub"),
+        ]);
+        let r = search_resources(&bills, &ResourceSearchQuery::default()).unwrap();
+        assert_eq!(r.resources[0].resource_name, "expensive");
+        assert_eq!(r.resources[1].resource_name, "mid");
+        assert_eq!(r.resources[2].resource_name, "cheap");
+    }
+
+    #[test]
+    fn search_resources_limit_truncates_results() {
+        let entries: Vec<BillEntry> = (0..10)
+            .map(|i| make_rich_entry("rg", &format!("res-{i}"), i as f64, "cat", "", "sub"))
+            .collect();
+        let bills = make_bills(entries);
+        let r = search_resources(
+            &bills,
+            &ResourceSearchQuery { limit: Some(3), ..Default::default() },
+        )
+        .unwrap();
+        assert_eq!(r.total_resources, 10);
+        assert_eq!(r.resources.len(), 3);
     }
 }

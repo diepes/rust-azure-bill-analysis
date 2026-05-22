@@ -37,6 +37,7 @@ The `--data-dir` CLI flag specifies where to look for billing CSVs. Defaults to 
 | `list_available_months` | _(none)_ | Array of `"YYYY-MM"` strings |
 | `get_monthly_cost` | `month: "YYYY-MM"`, `resource_group?: string`, `resource_name?: string` | Cost summary (see below) |
 | `get_daily_cost` | `date: "YYYY-MM-DD"`, `resource_group?: string`, `resource_name?: string` | Cost summary (see below) |
+| `search_resources` | `month: "YYYY-MM"`, `resource_type_filter?: string`, `meter_category_filter?: string`, `subscription_filter?: string`, `rg_filter?: string`, `name_filter?: string`, `tag_filter?: string`, `limit?: number` | Array of resource rows with cost (see below) |
 
 **Filter behaviour:** `resource_group` and `resource_name` are case-insensitive substring matches against `BillEntry::resource_group` and `BillEntry::resource_name` respectively. When a filter is specified, only matching rows are included. The tool description documents this for the LLM.
 
@@ -55,6 +56,28 @@ The `--data-dir` CLI flag specifies where to look for billing CSVs. Defaults to 
 ```
 
 When no filter is specified, `matched_resources` contains the top-10 contributors (by cost) so the LLM has context for follow-up questions. When a filter is active, `matched_resources` lists every distinct matched resource/RG with its individual cost and row count.
+
+**Response shape (`search_resources`):**
+
+```json
+{
+  "total_resources": 42,
+  "total_cost_usd": 950.30,
+  "resources": [
+    {
+      "resource_name": "prod-sql-01",
+      "resource_group": "rg-prod-eastus",
+      "resource_type": "microsoft.sql/servers",
+      "meter_category": "SQL Database",
+      "subscription_name": "ingenie-prod",
+      "total_cost_usd": 310.50,
+      "cost_usd_formatted": "$310.50"
+    }
+  ]
+}
+```
+
+Results are sorted by `total_cost_usd` descending. `total_resources` reflects the untruncated count — if it exceeds `limit` (default 50, max 200), the LLM knows results were truncated. All string filters are case-insensitive regex substring matches. `resource_type` is extracted from the ARM `resource_id` path as `{namespace}/{type}` (see `ResourceType` in CONTEXT.md).
 
 **Currency:** all costs are returned in USD (`costInUsd` column). USD is preferred over billing currency (NZD) because it is unaffected by exchange rate fluctuations between billing periods.
 

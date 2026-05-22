@@ -46,6 +46,39 @@ Diagram - [Flow Diagram](flowchartTD.md)
 
        cargo run -- disk-csv-savings --diskfile ../Azuredisks-Jira-PPD-29997.txt
 
+## MCP Server (bill_analysis_mcp)
+
+The `bill_analysis_mcp` binary exposes billing data to LLMs via the [Model Context Protocol](https://modelcontextprotocol.io/) (Streamable HTTP, 2025 spec).
+
+```bash
+# Local dev (no auth)
+cargo run --bin bill_analysis_mcp -- --no-auth --data-dir ./csv_data
+
+# Production (Entra OAuth)
+ENTRA_TENANT_ID=... ENTRA_CLIENT_ID=... ENTRA_CLIENT_SECRET=... \
+MCP_PUBLIC_URL=http://localhost:8091 \
+cargo run --bin bill_analysis_mcp -- --data-dir ./csv_data
+```
+
+### MCP Tools
+
+| Tool | What it does |
+|---|---|
+| `list_available_months` | Lists months with billing data available |
+| `get_monthly_cost` | Cost summary for a month, with optional RG/name filter |
+| `get_daily_cost` | Cost summary for a single day, with optional RG/name filter |
+| `search_resources` | Find resources by type, category, subscription, name, or tag — returns per-resource rows sorted by cost |
+
+### Example LLM queries enabled
+
+```
+search_resources(month="2026-05", resource_type_filter="publicipaddresses")
+search_resources(month="2026-05", meter_category_filter="Virtual Machines", subscription_filter="prod")
+get_monthly_cost(month="2026-05", resource_group="ingenie")
+```
+
+See `CONTEXT.md` for the full OAuth setup, environment variables, and troubleshooting guide.
+
 ## Run in watch/debug mode
 
 * Install cargo-watch if you haven't already. You can do this by running the following command in your terminal:

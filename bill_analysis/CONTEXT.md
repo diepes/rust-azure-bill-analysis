@@ -38,6 +38,7 @@ A Rust CLI tool that parses **Azure "Detailed" cost export CSVs** (amortized/enr
 | **BlobExport** | A single Azure Cost Management export run stored in blob storage — one GUID folder per date-range (e.g. `20240801-20240831/{run-id}/`), containing a `manifest.json` and one or more **ExportPart** files. Because `dataOverwriteBehavior` is `OverwritePreviousReport`, there is exactly **one** run-ID folder per date-range; its files are overwritten in-place on each daily run. The `manifest.json` `runInfo.endDate` field reflects how current the data is. |
 | **ExportPart** | One `part_N_0001.csv` file within a **BlobExport**. A month's billing data is split across one or more **ExportPart**s. _Avoid_: "CSV file", "part file" |
 | **BlobSource** | Configuration for reading billing data from Azure Blob Storage: service URL (`AZ_BILLING_BLOB_SERVICE_URL`), container name (`AZ_BILLING_CONTAINER_NAME`), and path prefix (`AZ_BILLING_BLOB_PREFIX`). Active when all three env vars are set. |
+| **ResourceType** | Azure resource type extracted from the ARM `resource_id` path — the two segments after `/providers/`, lowercased (e.g. `microsoft.compute/disks`, `microsoft.network/publicipaddresses`). Used to filter billing rows by resource kind without knowing resource names. _Avoid_: "ARM type", "provider type" |
 | **MCP** | Model Context Protocol — a standard for exposing tools to LLMs over HTTP |
 | **MCP tool** | A named function the LLM can invoke via MCP (e.g. `get_monthly_cost`) |
 | **BillCache** | Lazy in-memory cache mapping `YearMonth → Bills`; populated on first access, retained for the server lifetime |
@@ -69,7 +70,8 @@ src/bin/mcp.rs  (bill_analysis_mcp MCP server)
        └─ Tools
             ├─ list_available_months  → ["YYYY-MM", ...]
             ├─ get_monthly_cost       → cost summary in USD
-            └─ get_daily_cost         → cost summary in USD
+            ├─ get_daily_cost         → cost summary in USD
+            └─ search_resources       → resource rows with cost, filtered by ResourceType / meter_category / subscription / rg / name / tag
 ```
 
 ## Module Map
@@ -81,18 +83,23 @@ src/
 ├── cmd_parse.rs                   clap CLI structs (App, GlobalOpts, Commands)
 ├── find_files.rs                  Regex-based file discovery in a folder
 ├── az_disk.rs                     AzDisk / AzDisks — disk inventory parser (CSV or TXT)
+├── money.rs                       USD money type with arithmetic and serde support
+├── blob_source.rs                 BlobSource — reads BlobExport/ExportPart files from Azure Blob Storage
 ├── bin/
 │   └── mcp.rs                     MCP server binary (bill_analysis_mcp) — axum, Streamable HTTP
 └── bills/
     ├── bills.rs (mod)             Bills struct + parse_csv entry point
     ├── bill_entry.rs              BillEntry — single CSV row; serde PascalCase deserialise
+    ├── bill_filter.rs             BillFilter — compiled regex filters constructed from CLI/MCP args
     ├── bills_impl_basic.rs        push, len, calc_all_totals
     ├── bills_impl_cost_by_any.rs  cost_by_any_summary() — main filter+aggregation engine
     ├── bills_impl_cost_by_sub.rs  cost_by_subscription(), cost_by_resource_name()
     ├── bills_impl_currency.rs     get/set_billing_currency()
     ├── bills_sum_data.rs          SummaryData, CostTotal, CostSource, ReservationInfo
+    ├── cost_query.rs              query_cost(), search_resources() — MCP-facing query functions
     ├── cost_type_enum.rs          CostType enum
     ├── display.rs                 display_cost_by_filter(), print_summary() — coloured terminal output
+    ├── repository.rs              BillRepository — lazy BillCache backed by local CSV or BlobSource
     ├── summary.rs                 Summary struct + Bills::summary() (multi-month BillSummary command)
     └── tags.rs                    Tags — serde deserialiser for Azure tag key-value pairs
 ```

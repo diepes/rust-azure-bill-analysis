@@ -23,7 +23,7 @@ use axum::{
 };
 use bill_analysis::{
     bills::{
-        cost_query::{query_cost, CostQuery, round2},
+        cost_query::{query_cost, search_resources, CostQuery, ResourceSearchQuery, round2},
         repository::BillRepository,
     },
     blob_source::{BlobSource, BlobSourceConfig},
@@ -283,6 +283,48 @@ fn handle_tools_list(req: &RpcRequest) -> RpcResponse {
                         },
                         "required": ["date"]
                     }
+                },
+                {
+                    "name": "search_resources",
+                    "description": "Search for individual Azure resources and their costs for a billing month. Returns one row per unique resource (resource_name + resource_group) with cost, meter category, and Azure resource type (extracted from the ARM resource ID). Use meter_category or resource_type to find all resources of a specific kind (e.g. all Public IPs, all Disks). Results are capped at 50 by default, sorted by cost descending. The response includes total_resources and total_cost_usd for the full matched set (before the limit).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "month": {
+                                "type": "string",
+                                "description": "Billing month in YYYY-MM format, e.g. '2026-04'."
+                            },
+                            "resource_group": {
+                                "type": "string",
+                                "description": "Case-insensitive regex matched against resource group names. Omit to include all resource groups."
+                            },
+                            "resource_name": {
+                                "type": "string",
+                                "description": "Case-insensitive regex matched against resource names. Supports alternation, e.g. 'ingenie|eroad'. Omit to include all resources."
+                            },
+                            "meter_category": {
+                                "type": "string",
+                                "description": "Case-insensitive regex matched against the Azure meter category, e.g. 'Virtual Machines', 'Storage', 'Virtual Network'. Omit to include all categories."
+                            },
+                            "subscription": {
+                                "type": "string",
+                                "description": "Case-insensitive regex matched against subscription names. Supports alternation, e.g. 'prod|staging'. Omit to include all subscriptions."
+                            },
+                            "resource_type": {
+                                "type": "string",
+                                "description": "Case-insensitive regex matched against the Azure resource type extracted from the ARM resource ID (e.g. 'publicipaddresses', 'disks', 'microsoft.compute/virtualmachines'). Omit to include all resource types."
+                            },
+                            "tag_filter": {
+                                "type": "string",
+                                "description": "Case-insensitive regex matched against the full tag string, e.g. 'environment.*prod'. Omit to include all resources regardless of tags."
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum number of resources to return (default 50, max 200). Results are sorted by cost descending."
+                            }
+                        },
+                        "required": ["month"]
+                    }
                 }
             ]
         }),
@@ -308,6 +350,7 @@ async fn handle_tools_call(req: &RpcRequest, state: &AppState) -> RpcResponse {
         "list_available_months" => tool_list_available_months(state).await,
         "get_monthly_cost" => tool_get_monthly_cost(args, state).await,
         "get_daily_cost" => tool_get_daily_cost(args, state).await,
+        "search_resources" => tool_search_resources(args, state).await,
         _ => Err(format!("Unknown tool: {tool_name}")),
     };
 
@@ -395,6 +438,52 @@ async fn tool_get_daily_cost(
         "row_count": result.row_count,
         "date": date_str,
         "top_contributors": result.top_contributors,
+    }))
+    .unwrap())
+}
+
+// ---------------------------------------------------------------------------
+// Tool: search_resources
+// ---------------------------------------------------------------------------
+
+async fn tool_search_resources(
+    args: Option<&serde_json::Map<String, Value>>,
+    state: &AppState,
+) -> Result<String, String> {
+    let args = args.ok_or_else(|| "Missing arguments".to_string())?;
+    let month = args
+        .get("month")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Missing required argument 'month'".to_string())?;
+
+    let rg_filter = args.get("resource_group").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let name_filter = args.get("resource_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let tag_filter = args.get("tag_filter").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let meter_category_filter = args.get("meter_category").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let subscription_filter = args.get("subscription").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let resource_type_filter = args.get("resource_type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .map(|n| (n as usize).min(200));
+
+    let (year, mon) = parse_year_month(month)?;
+    let bills = state.repo.get(year, mon).await?;
+    let result = search_resources(&bills, &ResourceSearchQuery {
+        rg_filter,
+        name_filter,
+        tag_filter,
+        meter_category_filter,
+        subscription_filter,
+        resource_type_filter,
+        limit,
+    })?;
+
+    Ok(serde_json::to_string_pretty(&json!({
+        "period": month,
+        "total_resources": result.total_resources,
+        "total_cost_usd": result.total_cost_usd,
+        "resources": result.resources,
     }))
     .unwrap())
 }
