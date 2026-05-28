@@ -561,11 +561,27 @@ mod tests {
 
 #[tokio::main]
 async fn main() {
-    dotenvy::dotenv().ok();
+    // Load .env: try CWD first, then the project root two levels above the binary
+    // (i.e. <project_root>/target/release/<binary> → <project_root>/.env).
+    let env_loaded: Option<std::path::PathBuf> = dotenvy::dotenv()
+        .ok()
+        .or_else(|| {
+            let project_root = std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent()?.parent()?.parent().map(|p| p.to_path_buf()))?;
+            let env_path = project_root.join(".env");
+            dotenvy::from_path(&env_path).ok().map(|_| env_path)
+        });
+
     env_logger::Builder::from_env(
         env_logger::Env::default().default_filter_or("bill_analysis=info"),
     )
     .init();
+
+    match &env_loaded {
+        Some(path) => log::info!("[env] loaded .env from {}", path.display()),
+        None => log::debug!("[env] no .env file found in CWD or project root"),
+    }
 
     let args = Args::parse();
 

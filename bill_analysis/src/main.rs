@@ -59,7 +59,7 @@ async fn main() {
             let prev_path = app.bill_prev.or(app.global_opts.bill_prev_subtract_path);
             let (latest_bill, file_name) =
                 bill_analysis::load_bill_async(&bill_path, &filter_opts, debug).await;
-            log::info!("Loaded latest bill from '{:?}'", file_name);
+            log::info!("Loaded latest bill from '{}'", file_name);
             bill_analysis::display_total_cost_summary(&latest_bill, "Latest bill");
             // If set read previous bill and subtract it from latest bill
             let previous_bill: Option<bills::Bills> = if let Some(ref bill_prev_subtract_path) =
@@ -72,7 +72,7 @@ async fn main() {
                     panic!("Currency mismatch between bills");
                 }
                 log::info!(
-                    "Removing previous bill from latest bill '{:?}' (Filter matching resource ID's)",
+                    "Removing previous bill from latest bill '{}' (Filter matching resource ID's)",
                     prev_file_name
                 );
                 bill_analysis::display_total_cost_summary(&prev_bill, "Previous bill");

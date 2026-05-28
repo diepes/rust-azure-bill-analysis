@@ -32,6 +32,14 @@ pub fn resolve_date_shorthand(path: &Path) -> PathBuf {
     // Bare MM (exactly 2 digits, e.g. "04" or "10")
     let re_mm = Regex::new(r"^\d{2}$").unwrap();
     if re_mm.is_match(path_str) {
+        // Prefer the latest available year for this month from csv_data.
+        if let Some(candidate) = find_latest_year_month_for_mm(Path::new("csv_data"), path_str)
+            && let Some(p) = resolve_yyyymm_candidate(&candidate)
+        {
+            return p;
+        }
+
+        // Backward-compatible fallback: current year, then previous year.
         use chrono::{Datelike, Local};
         let today = Local::now();
         let cur_year = today.year();
@@ -86,6 +94,26 @@ fn resolve_yyyymm_candidate(token: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Find the latest available `YYYY-MM` token in `base` for a bare `MM` input.
+/// Matches top-level entries that start with either `YYYY-MM` or `YYYYMM`.
+fn find_latest_year_month_for_mm(base: &Path, month: &str) -> Option<String> {
+    let re = Regex::new(r"^(\d{4})-?(\d{2})").unwrap();
+    let mut best_year: Option<u32> = None;
+
+    for entry in fs::read_dir(base).ok()?.flatten() {
+        let name = entry.file_name();
+        let name = name.to_str()?;
+        if let Some(caps) = re.captures(name)
+            && &caps[2] == month
+            && let Ok(year) = caps[1].parse::<u32>()
+        {
+            best_year = Some(best_year.map_or(year, |b| b.max(year)));
+        }
+    }
+
+    best_year.map(|year| format!("{:04}-{}", year, month))
 }
 
 /// Scan `base` for an entry whose name starts with `prefix`.
@@ -241,6 +269,22 @@ pub fn parse_year_month_path(path: &Path) -> Option<(u32, u32)> {
     if s.len() >= 6 && s[..6].bytes().all(|b| b.is_ascii_digit()) {
         let year: u32 = s[..4].parse().ok()?;
         let month: u32 = s[4..6].parse().ok()?;
+        return Some((year, month));
+    }
+    // Bare MM shorthand: infer year from current date.
+    // If MM is ahead of the current month, assume previous year.
+    if s.len() == 2 && s.bytes().all(|b| b.is_ascii_digit()) {
+        use chrono::{Datelike, Local};
+        let month: u32 = s.parse().ok()?;
+        if !(1..=12).contains(&month) {
+            return None;
+        }
+        let today = Local::now();
+        let year = if month > today.month() {
+            (today.year() - 1) as u32
+        } else {
+            today.year() as u32
+        };
         return Some((year, month));
     }
     None

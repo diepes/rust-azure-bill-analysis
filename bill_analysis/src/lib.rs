@@ -122,7 +122,9 @@ pub async fn load_bill_async(
 
     // No local file — try blob storage if configured and path is a date shorthand.
     if let Some(cfg) = blob_source::BlobSourceConfig::from_env() {
-        if let Some((year, month)) = find_files::parse_year_month_path(file_or_folder) {
+        // Parse from the resolved value so bare month shorthand (e.g. "03") works,
+        // even when it maps to a year-month string only during resolution.
+        if let Some((year, month)) = find_files::parse_year_month_path(&resolved) {
             let month_str = format!("{year}-{month:02}");
             log::info!("[bill] no local file for {month_str}, trying blob storage");
             let blob = blob_source::BlobSource::new(cfg)
