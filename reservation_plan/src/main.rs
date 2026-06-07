@@ -1,14 +1,16 @@
-mod reservation;
 mod print_summary;
+mod reservation;
 
 use anyhow::Result;
-use reservation::{fetch_all_reservations, fetch_all_reservations_force_refresh, fetch_reservation_costs};
 use print_summary::print_summary;
+use reservation::{
+    fetch_all_reservations, fetch_all_reservations_force_refresh, fetch_reservation_costs,
+};
 
 fn main() -> Result<()> {
     // Load environment variables from .env file
     dotenv::dotenv().ok();
-    
+
     // Check for --refresh or --force flag
     let args: Vec<String> = std::env::args().collect();
 
@@ -23,7 +25,7 @@ fn main() -> Result<()> {
     let show_expired = args
         .iter()
         .any(|arg| arg == "--show-expired" || arg == "--show-expired-reservations");
-    
+
     // Parse color threshold parameters
     let cost_threshold = parse_threshold_arg(&args, "--cost-threshold", 4000.0);
     let units_threshold = parse_threshold_arg(&args, "--units-threshold", 10.0);
@@ -57,36 +59,60 @@ fn main() -> Result<()> {
             res.monthly_cost = Some(*cost);
             total_attached_cost += cost;
             matched_count += 1;
-            
+
             // Check for suspiciously low or zero costs - possible billing issue
             if !is_expired(&res.state) {
                 if *cost == 0.0 {
-                    zero_cost_warnings.push((res.display_name.clone(), res.resource_type.clone(), res.state.clone()));
+                    zero_cost_warnings.push((
+                        res.display_name.clone(),
+                        res.resource_type.clone(),
+                        res.state.clone(),
+                    ));
                 } else if *cost < 1.0 {
-                    low_cost_warnings.push((res.display_name.clone(), *cost, res.resource_type.clone()));
+                    low_cost_warnings.push((
+                        res.display_name.clone(),
+                        *cost,
+                        res.resource_type.clone(),
+                    ));
                 }
             }
-            
+
             if matched_count <= 5 {
-                println!("  Matched: {} - {} = ${:.2}", &res.reservation_order_id[..8], res.display_name, cost);
+                println!(
+                    "  Matched: {} - {} = ${:.2}",
+                    &res.reservation_order_id[..8],
+                    res.display_name,
+                    cost
+                );
             }
         }
     }
-    println!("Matched {} out of {} reservations with cost data (Total: ${:.2})", matched_count, reservations.len(), total_attached_cost);
-    
+    println!(
+        "Matched {} out of {} reservations with cost data (Total: ${:.2})",
+        matched_count,
+        reservations.len(),
+        total_attached_cost
+    );
+
     // Warn about reservations with zero costs
     if !zero_cost_warnings.is_empty() {
-        println!("\n⚠️  WARNING: Found {} active reservation(s) with ZERO monthly cost:", zero_cost_warnings.len());
+        println!(
+            "\n⚠️  WARNING: Found {} active reservation(s) with ZERO monthly cost:",
+            zero_cost_warnings.len()
+        );
         println!("    This may indicate they're not being used or a billing configuration issue:");
         for (name, rtype, state) in &zero_cost_warnings {
             println!("    - {} ({}) [{}]", name, rtype, state);
         }
         println!();
     }
-    
+
     // Warn about reservations with suspiciously low costs
     if !low_cost_warnings.is_empty() {
-        println!("⚠️  WARNING: Found {} reservation(s) with unusually low monthly costs (< $1):", low_cost_warnings.len());
+        println!(
+            "⚠️  WARNING: Found {} reservation(s) with unusually low monthly costs (< $1):",
+            low_cost_warnings.len()
+        );
         println!("    This may indicate a billing issue or misconfiguration:");
         for (name, cost, rtype) in &low_cost_warnings {
             println!("    - {} ({}) = ${:.2}/month", name, rtype, cost);
@@ -174,7 +200,9 @@ fn print_help() {
     println!("  -f, --force, --refresh            Force refresh from Azure (bypass cache)");
     println!("  --show-expired-reservations       Include expired reservations in output");
     println!("  --cost-threshold <value>          Cost variance threshold in $ (default: 4000)");
-    println!("  --units-threshold <value>         Units variance threshold (default: 10, uses average)");
+    println!(
+        "  --units-threshold <value>         Units variance threshold (default: 10, uses average)"
+    );
     println!("\nDescription:");
     println!("  Fetches all active Azure reservations and displays summary information.");
     println!("  Results are cached in cache_reservations_YYYYMM.json for the current month.");
@@ -188,10 +216,12 @@ fn is_expired(state: &str) -> bool {
 
 fn parse_threshold_arg(args: &[String], flag: &str, default: f64) -> f64 {
     for i in 0..args.len() {
-        if args[i] == flag && i + 1 < args.len()
-            && let Ok(value) = args[i + 1].parse::<f64>() {
-                return value;
-            }
+        if args[i] == flag
+            && i + 1 < args.len()
+            && let Ok(value) = args[i + 1].parse::<f64>()
+        {
+            return value;
+        }
     }
     default
 }

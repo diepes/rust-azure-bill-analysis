@@ -5,24 +5,37 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+/// Deserialize a JSON string or null into a String, treating null as "".
+fn null_as_empty<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(Option::<String>::deserialize(d)?.unwrap_or_default())
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "PascalCase")]
 pub struct Reservation {
     pub reservation_order_id: String,
     pub reservation_id: String,
+    #[serde(deserialize_with = "null_as_empty")]
     pub display_name: String,
-    #[serde(rename = "SKU")]
+    #[serde(rename = "SKU", deserialize_with = "null_as_empty")]
     pub sku: String,
     pub quantity: u32,
+    #[serde(deserialize_with = "null_as_empty")]
     pub purchase_date: String,
+    #[serde(deserialize_with = "null_as_empty")]
     pub expiry_date: String,
+    #[serde(deserialize_with = "null_as_empty")]
     pub term: String,
+    #[serde(deserialize_with = "null_as_empty")]
     pub state: String,
+    #[serde(deserialize_with = "null_as_empty")]
     pub scope: String,
     pub instance_flexibility: Option<String>,
-    #[serde(rename = "Type")]
+    #[serde(rename = "Type", deserialize_with = "null_as_empty")]
     pub resource_type: String,
+    #[serde(deserialize_with = "null_as_empty")]
     pub billing_plan: String,
+    #[serde(deserialize_with = "null_as_empty")]
     pub region: String,
     #[serde(skip)]
     pub monthly_cost: Option<f64>,
@@ -43,15 +56,14 @@ fn fetch_all_reservations_internal(force_refresh: bool) -> Result<Vec<Reservatio
     let cache_file = get_cache_filename();
 
     // Try to load from cache first (unless force refresh)
-    if !force_refresh
-        && let Ok(cached_reservations) = load_from_cache(&cache_file) {
-            println!(
-                "Loaded {} reservations from cache: {}",
-                cached_reservations.len(),
-                cache_file
-            );
-            return Ok(cached_reservations);
-        }
+    if !force_refresh && let Ok(cached_reservations) = load_from_cache(&cache_file) {
+        println!(
+            "Loaded {} reservations from cache: {}",
+            cached_reservations.len(),
+            cache_file
+        );
+        return Ok(cached_reservations);
+    }
 
     // Cache miss or force refresh - fetch from Azure
     if force_refresh {
@@ -237,25 +249,29 @@ pub fn fetch_reservation_costs() -> Result<std::collections::HashMap<String, f64
                 .args(["account", "show", "--query", "id", "-o", "tsv"])
                 .output()
                 .context("Failed to execute 'az account show' command. Make sure Azure CLI is installed and you're logged in.")?;
-            
+
             if !output.status.success() {
-                anyhow::bail!("Failed to get subscription ID from Azure CLI. Please set MANAGEMENT_SUBSCRIPTION_ID in .env file.");
+                anyhow::bail!(
+                    "Failed to get subscription ID from Azure CLI. Please set MANAGEMENT_SUBSCRIPTION_ID in .env file."
+                );
             }
-            
+
             let id = String::from_utf8(output.stdout)
                 .context("Failed to parse subscription ID")?
                 .trim()
                 .to_string();
-            
+
             if id.is_empty() {
-                anyhow::bail!("Azure CLI returned empty subscription ID. Please set MANAGEMENT_SUBSCRIPTION_ID in .env file.");
+                anyhow::bail!(
+                    "Azure CLI returned empty subscription ID. Please set MANAGEMENT_SUBSCRIPTION_ID in .env file."
+                );
             }
-            
+
             println!("Using subscription ID from Azure CLI: {}", id);
             id
         }
     };
-    
+
     // Get previous month's date range for complete billing data
     let now = chrono::Local::now();
     let last_month = if now.month() == 1 {
@@ -263,7 +279,7 @@ pub fn fetch_reservation_costs() -> Result<std::collections::HashMap<String, f64
     } else {
         chrono::NaiveDate::from_ymd_opt(now.year(), now.month() - 1, 1).unwrap()
     };
-    
+
     // Get last day of previous month
     let last_day = if last_month.month() == 12 {
         31
@@ -274,11 +290,17 @@ pub fn fetch_reservation_costs() -> Result<std::collections::HashMap<String, f64
             .unwrap()
             .day()
     };
-    
+
     let from_date = format!("{}-{:02}-01", last_month.year(), last_month.month());
-    let to_date = format!("{}-{:02}-{:02}", last_month.year(), last_month.month(), last_day);
-    
-    let query_body = format!(r#"{{
+    let to_date = format!(
+        "{}-{:02}-{:02}",
+        last_month.year(),
+        last_month.month(),
+        last_day
+    );
+
+    let query_body = format!(
+        r#"{{
         "type": "ActualCost",
         "timeframe": "Custom",
         "timePeriod": {{
@@ -298,7 +320,9 @@ pub fn fetch_reservation_costs() -> Result<std::collections::HashMap<String, f64
                 {{"type": "Dimension", "name": "ReservationName"}}
             ]
         }}
-    }}"#, from_date, to_date);
+    }}"#,
+        from_date, to_date
+    );
 
     let uri = format!(
         "https://management.azure.com/subscriptions/{}/providers/Microsoft.CostManagement/query?api-version=2023-11-01",
@@ -310,9 +334,12 @@ pub fn fetch_reservation_costs() -> Result<std::collections::HashMap<String, f64
     let output = Command::new("az")
         .args([
             "rest",
-            "--method", "post",
-            "--uri", &uri,
-            "--body", &query_body,
+            "--method",
+            "post",
+            "--uri",
+            &uri,
+            "--body",
+            &query_body,
         ])
         .output()
         .context("Failed to execute az rest command")?;
@@ -335,13 +362,14 @@ pub fn fetch_reservation_costs() -> Result<std::collections::HashMap<String, f64
         for row in rows {
             if let Some(row_array) = row.as_array()
                 && row_array.len() >= 2
-                    && let (Some(cost), Some(reservation_id)) = 
-                        (row_array[0].as_f64(), row_array[1].as_str()) {
-                        // Only store non-empty reservation IDs
-                        if !reservation_id.is_empty() {
-                            costs.insert(reservation_id.to_string(), cost);
-                        }
-                    }
+                && let (Some(cost), Some(reservation_id)) =
+                    (row_array[0].as_f64(), row_array[1].as_str())
+            {
+                // Only store non-empty reservation IDs
+                if !reservation_id.is_empty() {
+                    costs.insert(reservation_id.to_string(), cost);
+                }
+            }
         }
     }
 

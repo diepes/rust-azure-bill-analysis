@@ -1,6 +1,6 @@
 use crate::reservation::Reservation;
-use std::collections::HashMap;
 use chrono::{Datelike, Local, NaiveDate};
+use std::collections::HashMap;
 
 pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_threshold: f64) {
     let mut by_type: HashMap<String, (u32, u32, f64, Vec<u32>)> = HashMap::new(); // (total_quantity, reservation_count, monthly_cost, remaining_months_list)
@@ -14,27 +14,31 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
     let mut total_monthly_cost = 0.0;
 
     let current_date = Local::now().date_naive();
+    let current_year_month = format!("{}-{:02}", current_date.year(), current_date.month());
 
     for res in reservations {
         let res_cost = res.monthly_cost.unwrap_or(0.0);
         total_monthly_cost += res_cost;
 
         // Calculate remaining months for this reservation
-        let remaining_months = if let Ok(expiry_date) = NaiveDate::parse_from_str(&res.expiry_date, "%Y-%m-%d") {
-            if expiry_date > current_date {
-                let years_diff = expiry_date.year() - current_date.year();
-                let months_diff = expiry_date.month() as i32 - current_date.month() as i32;
-                let total_months = years_diff * 12 + months_diff;
-                total_months.max(0) as u32
+        let remaining_months =
+            if let Ok(expiry_date) = NaiveDate::parse_from_str(&res.expiry_date, "%Y-%m-%d") {
+                if expiry_date > current_date {
+                    let years_diff = expiry_date.year() - current_date.year();
+                    let months_diff = expiry_date.month() as i32 - current_date.month() as i32;
+                    let total_months = years_diff * 12 + months_diff;
+                    total_months.max(0) as u32
+                } else {
+                    0
+                }
             } else {
                 0
-            }
-        } else {
-            0
-        };
+            };
 
         // Track by resource type
-        let entry = by_type.entry(res.resource_type.clone()).or_insert((0, 0, 0.0, Vec::new()));
+        let entry = by_type
+            .entry(res.resource_type.clone())
+            .or_insert((0, 0, 0.0, Vec::new()));
         entry.0 += res.quantity; // total quantity
         entry.1 += 1; // reservation count
         entry.2 += res_cost; // monthly cost
@@ -43,7 +47,9 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
         // For VirtualMachines, also track by VM type (SKU)
         if res.resource_type == "VirtualMachines" {
             let vm_type_key = format!("VM-{}", res.sku.to_lowercase());
-            let vm_entry = by_vm_type.entry(vm_type_key).or_insert((0, 0, 0.0, Vec::new()));
+            let vm_entry = by_vm_type
+                .entry(vm_type_key)
+                .or_insert((0, 0, 0.0, Vec::new()));
             vm_entry.0 += res.quantity;
             vm_entry.1 += 1;
             vm_entry.2 += res_cost;
@@ -51,7 +57,10 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
         }
 
         // Track by expiry month - both units and count
-        if let Some(expiry_month) = extract_year_month(&res.expiry_date) {
+        // Include current month and future only (skip already-expired past months)
+        if let Some(expiry_month) = extract_year_month(&res.expiry_date)
+            && expiry_month >= current_year_month
+        {
             let entry = by_expiry_month
                 .entry(expiry_month.clone())
                 .or_insert((0, 0));
@@ -59,7 +68,9 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
             entry.1 += 1; // reservation count
 
             // Track cost by expiry month
-            *cost_by_expiry_month.entry(expiry_month.clone()).or_insert(0.0) += res_cost;
+            *cost_by_expiry_month
+                .entry(expiry_month.clone())
+                .or_insert(0.0) += res_cost;
 
             // Track 3-year reservations separately
             if res.term == "P3Y" {
@@ -96,15 +107,20 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
         } else {
             0.0
         };
-        println!("    {}: {} ( {} x Reservations) - ${:.2}/month (~{:.0} months remaining)", rtype, quantity, count, cost, avg_remaining);
+        println!(
+            "    {}: {} ( {} x Reservations) - ${:.2}/month (~{:.0} months remaining)",
+            rtype, quantity, count, cost, avg_remaining
+        );
 
         // If it's VirtualMachines, show the breakdown by VM type, sorted by quantity
         if rtype == "VirtualMachines" && !by_vm_type.is_empty() {
             let mut vm_type_vec: Vec<_> = by_vm_type.iter().collect();
             vm_type_vec.sort_by_key(|b| std::cmp::Reverse(b.1.0)); // Sort by quantity descending
-            for (vm_type, (vm_quantity, vm_count, vm_cost, vm_remaining_months_list)) in vm_type_vec {
+            for (vm_type, (vm_quantity, vm_count, vm_cost, vm_remaining_months_list)) in vm_type_vec
+            {
                 let vm_avg_remaining = if !vm_remaining_months_list.is_empty() {
-                    vm_remaining_months_list.iter().sum::<u32>() as f64 / vm_remaining_months_list.len() as f64
+                    vm_remaining_months_list.iter().sum::<u32>() as f64
+                        / vm_remaining_months_list.len() as f64
                 } else {
                     0.0
                 };
@@ -119,12 +135,17 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
     print!("\n  By Term:");
     for (term, count) in by_term.iter() {
         let term_str = match term.as_str() {
-            "P1Y" => "1 Year",
-            "P3Y" => "3 Years",
+            "P1Y" => "1_Year",
+            "P3Y" => "3_Years",
             _ => term,
         };
-        print!("      {}: {}", term_str, count);
+        print!("   {}: {}", term_str, count);
     }
+    println!();
+    println!(
+        "   Legend:   u=RI flex units (quantity), r=reservation records expiring  \
+        (green=below avg, red=above avg — aim for even spread across months)"
+    );
 
     // Aggregate units and counts by month (01-12) across all years
     let mut month_totals: HashMap<String, (u32, u32)> = HashMap::new(); // (units, count)
@@ -134,7 +155,7 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
         let entry = month_totals.entry(month.to_string()).or_insert((0, 0));
         entry.0 += units;
         entry.1 += count;
-        
+
         // Also aggregate cost by month
         if let Some(cost) = cost_by_expiry_month.get(year_month) {
             *month_cost_totals.entry(month.to_string()).or_insert(0.0) += cost;
@@ -161,6 +182,7 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
     const GREEN: &str = "\x1b[32m";
     const RED: &str = "\x1b[31m";
     const RESET: &str = "\x1b[0m";
+    const BLUE: &str = "\x1b[94m"; // bright blue foreground for month headings
 
     println!(
         "\n  Expiry Distribution by Month from {current_month} {current_year} (Combined across all years): (Average units: {average_units:.2})",
@@ -179,16 +201,29 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
     let label_width = max_len.max(6); // Minimum 6 characters
 
     // First line: month names
-    print!("{:>width$}|", "", width = label_width);
-    for (month, _, _) in &ordered_months {
-        print!("{:>8} |", format_month(month));
+    print!("{:>width$}|{:>8} |", "", "Total", width = label_width);
+    for (i, (month, _, _)) in ordered_months.iter().enumerate() {
+        let blue = if i == 0 { BLUE } else { "" };
+        print!("{}{:>8}{} |", blue, format_month(month), RESET);
     }
     println!();
 
     // Second line: ALL - total units/reservations with color based on units
-    let units_threshold_val = if units_threshold > 0.0 { units_threshold } else { 0.0 };
-    print!("{:>width$}|", "ALL", width = label_width);
-    for (_, units, count) in &ordered_months {
+    let units_threshold_val = if units_threshold > 0.0 {
+        units_threshold
+    } else {
+        0.0
+    };
+    let total_all_units: u32 = ordered_months.iter().map(|(_, u, _)| u).sum();
+    let total_all_count: u32 = ordered_months.iter().map(|(_, _, c)| c).sum();
+    let total_all_display = format!("{}u/{}r", total_all_units, total_all_count);
+    print!(
+        "{:>width$}|{:>8} |",
+        "ALL",
+        total_all_display,
+        width = label_width
+    );
+    for (_, units, count) in ordered_months.iter() {
         // Apply color coding even to zero/dash values
         let color = if (*units as f64) < average_units - units_threshold_val {
             GREEN
@@ -210,9 +245,18 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
     // Calculate average cost for color coding
     let total_cost: f64 = month_cost_totals.values().sum();
     let average_cost = total_cost / 12.0;
-    
-    print!("{:>width$}|", "Commitment/m", width = label_width);
-    for (month, _, _) in &ordered_months {
+    let total_cost_display = if total_cost > 0.0 {
+        format!("${:.0}k", total_cost / 1000.0)
+    } else {
+        "-".to_string()
+    };
+    print!(
+        "{:>width$}|{:>8} |",
+        "Commitment/m",
+        total_cost_display,
+        width = label_width
+    );
+    for (month, _, _) in ordered_months.iter() {
         let cost = month_cost_totals.get(month).copied().unwrap_or(0.0);
         let color = if cost > 0.0 {
             if cost < average_cost - cost_threshold {
@@ -223,7 +267,7 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
                 RESET
             }
         } else if average_cost > 0.0 {
-            GREEN  // Zero cost is below average when average > 0
+            GREEN // Zero cost is below average when average > 0
         } else {
             RESET
         };
@@ -245,7 +289,7 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
         entry.0 += units;
         entry.1 += count;
     }
-    
+
     // Create ordered months for 3-year
     let mut ordered_months_3y = Vec::new();
     for i in 0..12 {
@@ -254,13 +298,22 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
         let (units, count) = month_totals_3y.get(&month_str).copied().unwrap_or((0, 0));
         ordered_months_3y.push((month_str, units, count));
     }
-    
-    // Calculate average for 3-year
+
     let total_units_3y: u32 = ordered_months_3y.iter().map(|(_, units, _)| *units).sum();
+    let total_count_3y: u32 = ordered_months_3y.iter().map(|(_, _, c)| *c).sum();
     let average_units_3y = total_units_3y as f64 / 12.0;
-    
-    print!("{:>width$}|", "3year", width = label_width);
-    for (_, units, count) in &ordered_months_3y {
+    let total_3y_display = if total_count_3y > 0 {
+        format!("{}u/{}r", total_units_3y, total_count_3y)
+    } else {
+        "-".to_string()
+    };
+    print!(
+        "{:>width$}|{:>8} |",
+        "3year",
+        total_3y_display,
+        width = label_width
+    );
+    for (_, units, count) in ordered_months_3y.iter() {
         // Apply color coding to zero/dash values with threshold
         let color = if (*units as f64) < average_units_3y - units_threshold_val {
             GREEN
@@ -291,10 +344,27 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
             type_units_vec.push(units);
         }
         let type_total_units: u32 = type_units_vec.iter().sum();
+        let type_total_count: u32 = ordered_months
+            .iter()
+            .map(|(month, _, _)| {
+                by_type_month
+                    .get(&(resource_type.clone(), month.clone()))
+                    .map_or(0, |(_, c)| *c)
+            })
+            .sum();
         let type_average_units = type_total_units as f64 / 12.0;
-        
-        print!("{:>width$}|", resource_type, width = label_width);
-        for (month, _, _) in &ordered_months {
+        let type_total_display = if type_total_count > 0 {
+            format!("{}u/{}r", type_total_units, type_total_count)
+        } else {
+            "-".to_string()
+        };
+        print!(
+            "{:>width$}|{:>8} |",
+            resource_type,
+            type_total_display,
+            width = label_width
+        );
+        for (month, _, _) in ordered_months.iter() {
             let key = (resource_type.clone(), month.clone());
             let (units, count) = by_type_month.get(&key).copied().unwrap_or((0, 0));
 
@@ -306,7 +376,7 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
             } else {
                 RESET
             };
-            
+
             let display = if count > 0 {
                 format!("{}u/{}r", units, count)
             } else {
@@ -316,14 +386,15 @@ pub fn print_summary(reservations: &[Reservation], cost_threshold: f64, units_th
         }
         println!();
     }
-    
+
     // Last line: month names (repeated at bottom)
-    print!("{:>width$}|", "", width = label_width);
-    for (month, _, _) in &ordered_months {
-        print!("{:>8} |", format_month(month));
+    print!("{:>width$}|{:>8} |", "", "Total", width = label_width);
+    for (i, (month, _, _)) in ordered_months.iter().enumerate() {
+        let blue = if i == 0 { BLUE } else { "" };
+        print!("{}{:>8}{} |", blue, format_month(month), RESET);
     }
     println!();
-    
+
     println!("\nTHE END.");
 }
 
