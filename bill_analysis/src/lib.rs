@@ -1,6 +1,6 @@
 pub mod az_disk;
-pub mod blob_source;
 pub mod bills;
+pub mod blob_source;
 pub mod money;
 use bills::Bills;
 use colored::Colorize;
@@ -132,9 +132,7 @@ pub async fn load_bill_async(
             let bills = blob
                 .load_bills_for_month(year, month, filter_opts)
                 .await
-                .unwrap_or_else(|e| {
-                    panic!("Failed to load bill from blob for {month_str}: {e}")
-                });
+                .unwrap_or_else(|e| panic!("Failed to load bill from blob for {month_str}: {e}"));
             return (bills, month_str);
         }
     }

@@ -11,16 +11,14 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use bill_analysis::{
-    bills::repository::BillRepository,
-};
+use bill_analysis::bills::repository::BillRepository;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use rand::Rng;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, sync::Arc, time::Instant};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, watch};
 
 // ---------------------------------------------------------------------------
 // Entra OAuth configuration
@@ -108,7 +106,58 @@ pub struct PkceFlowState {
     pub created_at: Instant,
 }
 
-/// Short-lived entry mapping a server-issued authorization code to an Entra access token.
+/// Result of a completed (or failed) OAuth flow, stored server-side so the
+/// MCP client can poll `/mcp/auth/wait?state=<client_state>` instead of
+/// relying on a local callback server that may have closed.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum AuthFlowResult {
+    /// Browser has been redirected to Entra; waiting for the user.
+    Pending,
+    /// User authenticated successfully; MCP client should exchange this code at /token.
+    Complete { code: String, redirect_uri: String },
+    /// Entra (or our server) returned an error.
+    Error {
+        error: String,
+        error_description: String,
+    },
+}
+
+/// Map from client_state → flow result.  Entries are created by
+/// `authorize_handler` and resolved (or failed) by `callback_handler`.
+pub type AuthResultStore = Arc<RwLock<HashMap<String, AuthFlowResult>>>;
+
+// ---------------------------------------------------------------------------
+// Server-managed session flow (no LLM callback server required)
+// ---------------------------------------------------------------------------
+
+/// Result broadcast to a long-polling `POST /mcp` connection when a
+/// server-managed OAuth flow (started via `/auth/start`) completes.
+#[derive(Clone, Debug)]
+pub enum PendingAuthResult {
+    Success,
+    Failure { error: String, description: String },
+}
+
+/// Validated identity stored after a successful server-managed auth flow.
+/// Keyed by `session_id` which doubles as the bearer token.
+#[derive(Clone, Debug)]
+pub struct SessionInfo {
+    pub upn: String,
+    #[allow(dead_code)]
+    pub oid: String,
+    #[allow(dead_code)]
+    pub roles: Vec<String>,
+    pub created_at: Instant,
+}
+
+/// Active server-managed sessions: session_id → identity.
+pub type SessionStore = Arc<RwLock<HashMap<String, SessionInfo>>>;
+/// Pending server-managed auth flows: session_id → watch sender.
+/// The `POST /mcp` long-poll handler holds a receiver and awaits a value.
+pub type PendingSessionStore =
+    Arc<RwLock<HashMap<String, watch::Sender<Option<PendingAuthResult>>>>>;
+
 /// Consumed once in POST /token; pruned after 5 minutes.
 #[allow(dead_code)]
 pub struct TempCodeEntry {
@@ -147,22 +196,31 @@ pub struct AppState {
     pub repo: Arc<BillRepository>,
     /// None when --no-auth is set; all MCP callers are trusted.
     pub entra: Option<EntraConfig>,
+    /// When true, JWT is still validated but the BillingViewer App Role is not required.
+    pub no_role_check: bool,
     pub pkce_store: PkceStateStore,
     pub temp_codes: TempCodeStore,
     pub jwks_cache: JwksCache,
+    /// Legacy: server-side auth flow results for the old long-poll endpoint.
+    pub auth_results: AuthResultStore,
+    /// Server-managed sessions: session_id → validated identity.
+    pub sessions: SessionStore,
+    /// Pending server-managed auth flows waiting for the browser to complete.
+    pub pending_sessions: PendingSessionStore,
 }
 
 impl AppState {
-    pub fn new(
-        repo: Arc<BillRepository>,
-        entra: Option<EntraConfig>,
-    ) -> Self {
+    pub fn new(repo: Arc<BillRepository>, entra: Option<EntraConfig>, no_role_check: bool) -> Self {
         Self {
             repo,
             entra,
+            no_role_check,
             pkce_store: Arc::new(RwLock::new(HashMap::new())),
             temp_codes: Arc::new(RwLock::new(HashMap::new())),
             jwks_cache: Arc::new(RwLock::new(None)),
+            auth_results: Arc::new(RwLock::new(HashMap::new())),
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            pending_sessions: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
@@ -184,8 +242,9 @@ pub async fn oauth_metadata_handler(State(state): State<AppState>) -> impl IntoR
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code"],
         "code_challenge_methods_supported": ["S256"],
-        "scopes_supported": ["openid", "profile", "email"],
+        "scopes_supported": ["openid", "profile"],
         "registration_endpoint": format!("{}/register", base),
+        "auth_wait_endpoint": format!("{}/mcp/auth/wait", base),
     });
     log::debug!("  [oauth] authorization-server metadata: {body}");
     Json(body).into_response()
@@ -252,7 +311,8 @@ pub async fn authorize_handler(
 ) -> Response {
     log::debug!(
         "  [oauth] /authorize called with client_id={:?}, redirect_uri={}",
-        params.client_id, params.redirect_uri
+        params.client_id,
+        params.redirect_uri
     );
 
     let entra = match &state.entra {
@@ -274,8 +334,7 @@ pub async fn authorize_handler(
     }
 
     let server_state = random_string(32);
-    let client_state = params.state.unwrap_or_default();
-    let default_scope = "openid profile email".to_string();
+    let default_scope = "openid profile".to_string();
     let raw_scope = params
         .scope
         .filter(|s| !s.is_empty())
@@ -283,7 +342,7 @@ pub async fn authorize_handler(
     let scope: String = {
         let filtered: Vec<&str> = raw_scope
             .split_whitespace()
-            .filter(|tok| matches!(*tok, "openid" | "profile" | "email"))
+            .filter(|tok| matches!(*tok, "openid" | "profile"))
             .collect();
         if filtered.is_empty() {
             default_scope
@@ -293,19 +352,28 @@ pub async fn authorize_handler(
     };
     log::debug!("  [oauth] /authorize using scope: {scope:?}");
 
-    {
+    let client_state_key = {
         let mut store = state.pkce_store.write().await;
         store.retain(|_, v| v.created_at.elapsed().as_secs() < 600);
+        let client_state = params.state.clone().unwrap_or_default();
         store.insert(
             server_state.clone(),
             PkceFlowState {
                 code_challenge: params.code_challenge,
                 code_challenge_method: method.to_string(),
                 client_redirect_uri: params.redirect_uri,
-                client_state,
+                client_state: client_state.clone(),
                 created_at: Instant::now(),
             },
         );
+        client_state
+    };
+
+    // Pre-register a Pending entry so the long-poll endpoint can see the flow.
+    {
+        let mut results = state.auth_results.write().await;
+        results.retain(|_, _| true); // prune old entries lazily via poll timeout
+        results.insert(client_state_key, AuthFlowResult::Pending);
     }
 
     let target = format!(
@@ -320,11 +388,66 @@ pub async fn authorize_handler(
     Redirect::temporary(&target).into_response()
 }
 
+// ---------------------------------------------------------------------------
+// Server-managed auth start: GET /auth/start?session=<session_id>
+// ---------------------------------------------------------------------------
+
+/// The LLM receives this URL in the 401 error body, opens it in the browser,
+/// and the server handles the full PKCE dance on the user's behalf.
+/// On completion, the pending `POST /mcp` connection is unblocked.
+#[derive(Deserialize)]
+pub struct AuthStartParams {
+    pub session: String,
+}
+
+pub async fn auth_start_handler(
+    State(state): State<AppState>,
+    Query(params): Query<AuthStartParams>,
+) -> Response {
+    let entra = match &state.entra {
+        Some(e) => e.clone(),
+        None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
+    };
+
+    log::info!("  [oauth] /auth/start session={}", params.session);
+
+    // Register this session in pkce_store with an empty client_redirect_uri
+    // to mark it as server-managed (no CLI callback server involved).
+    {
+        let mut store = state.pkce_store.write().await;
+        store.retain(|_, v| v.created_at.elapsed().as_secs() < 600);
+        store.insert(
+            params.session.clone(), // session_id IS the server_state sent to Entra
+            PkceFlowState {
+                code_challenge: String::new(),
+                code_challenge_method: String::new(),
+                client_redirect_uri: String::new(), // empty = server-managed
+                client_state: params.session.clone(),
+                created_at: Instant::now(),
+            },
+        );
+    }
+
+    // Redirect browser directly to Entra.  As a confidential client we use
+    // client_secret for the token exchange so no PKCE code_challenge is needed.
+    let target = format!(
+        "{}?response_type=code&client_id={}&redirect_uri={}&state={}&scope={}&prompt=select_account",
+        entra.authorize_url(),
+        url_encode(&entra.client_id),
+        url_encode(&entra.redirect_uri()),
+        url_encode(&params.session),
+        url_encode("openid profile"),
+    );
+    log::debug!("  [oauth] /auth/start redirecting to Entra: {}", target);
+    Redirect::temporary(&target).into_response()
+}
+
 #[derive(Deserialize)]
 pub struct CallbackParams {
     pub code: Option<String>,
     pub state: Option<String>,
     pub error: Option<String>,
+    pub error_subcode: Option<String>,
     pub error_description: Option<String>,
 }
 
@@ -339,8 +462,88 @@ pub async fn callback_handler(
 
     if let Some(err) = &params.error {
         let desc = params.error_description.as_deref().unwrap_or("");
-        log::debug!("  [oauth] Entra authorize error={err} description={desc}");
-        return (StatusCode::BAD_GATEWAY, format!("Entra error: {err}")).into_response();
+        let subcode = params.error_subcode.as_deref().unwrap_or("");
+        log::warn!("  [oauth] Entra authorize error={err} subcode={subcode} description={desc}");
+
+        let callback_url = if let Some(server_state) = &params.state {
+            let client_redirect = {
+                let mut store = state.pkce_store.write().await;
+                store
+                    .remove(server_state)
+                    .map(|e| (e.client_redirect_uri, e.client_state))
+            };
+            if let Some((redirect_uri, client_state)) = client_redirect {
+                if redirect_uri.is_empty() {
+                    // Server-managed flow: notify the waiting POST /mcp long-poll directly.
+                    let pending = state.pending_sessions.read().await;
+                    if let Some(tx) = pending.get(&client_state) {
+                        tx.send(Some(PendingAuthResult::Failure {
+                            error: err.clone(),
+                            description: desc.to_string(),
+                        }))
+                        .ok();
+                    }
+                    let html = build_auth_error_page(err, desc, None);
+                    return (
+                        StatusCode::OK,
+                        [("Content-Type", "text/html; charset=utf-8")],
+                        html,
+                    )
+                        .into_response();
+                }
+
+                // CLI-managed flow: resolve long-poll waiter and redirect to client.
+                if !client_state.is_empty() {
+                    let mut results = state.auth_results.write().await;
+                    results.insert(
+                        client_state.clone(),
+                        AuthFlowResult::Error {
+                            error: err.clone(),
+                            error_description: desc.to_string(),
+                        },
+                    );
+                }
+                let mut url = format!(
+                    "{}?error={}&error_description={}",
+                    redirect_uri,
+                    url_encode(err),
+                    url_encode(desc),
+                );
+                if !client_state.is_empty() {
+                    url.push_str(&format!("&state={}", url_encode(&client_state)));
+                }
+
+                // Try to notify the CLI's local callback server directly.
+                let notify_url = url.clone();
+                tokio::spawn(async move {
+                    match reqwest::Client::new()
+                        .get(&notify_url)
+                        .timeout(std::time::Duration::from_secs(5))
+                        .send()
+                        .await
+                    {
+                        Ok(r) => {
+                            log::debug!("  [oauth] notified CLI callback: HTTP {}", r.status())
+                        }
+                        Err(e) => log::warn!("  [oauth] CLI callback notification failed: {e}"),
+                    }
+                });
+
+                Some(url)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let html = build_auth_error_page(err, desc, callback_url.as_deref());
+        return (
+            StatusCode::OK,
+            [("Content-Type", "text/html; charset=utf-8")],
+            html,
+        )
+            .into_response();
     }
 
     let entra_code = match &params.code {
@@ -396,9 +599,115 @@ pub async fn callback_handler(
             let err = token_json["error"].as_str().unwrap_or("unknown");
             let desc = token_json["error_description"].as_str().unwrap_or("");
             log::warn!("  [oauth] FAIL token exchange entra_error={err} desc={desc}");
+            // Notify pending server-managed session of failure.
+            if pkce_entry.client_redirect_uri.is_empty() {
+                let pending = state.pending_sessions.read().await;
+                if let Some(tx) = pending.get(&pkce_entry.client_state) {
+                    tx.send(Some(PendingAuthResult::Failure {
+                        error: err.to_string(),
+                        description: desc.to_string(),
+                    }))
+                    .ok();
+                }
+                let html = build_auth_error_page(err, desc, None);
+                return (
+                    StatusCode::OK,
+                    [("Content-Type", "text/html; charset=utf-8")],
+                    html,
+                )
+                    .into_response();
+            }
             return (StatusCode::BAD_GATEWAY, "token exchange failed").into_response();
         }
     };
+
+    // Server-managed flow: validate the id_token now, store the session, and
+    // wake the waiting POST /mcp connection.  No code issuance needed.
+    if pkce_entry.client_redirect_uri.is_empty() {
+        let session_id = pkce_entry.client_state.clone();
+        match validate_jwt(&access_token, &entra, &state.jwks_cache).await {
+            Ok(caller) => {
+                if !state.no_role_check && !caller.roles.contains(&"BillingViewer".to_string()) {
+                    log::warn!(
+                        "  [oauth] FAIL missing_role oid={} upn={} session={session_id}",
+                        caller.oid,
+                        caller.upn
+                    );
+                    let pending = state.pending_sessions.read().await;
+                    if let Some(tx) = pending.get(&session_id) {
+                        tx.send(Some(PendingAuthResult::Failure {
+                            error: "forbidden".to_string(),
+                            description: "Missing required App Role: BillingViewer".to_string(),
+                        }))
+                        .ok();
+                    }
+                    let html = build_auth_error_page(
+                        "forbidden",
+                        "Missing required App Role: BillingViewer",
+                        None,
+                    );
+                    return (
+                        StatusCode::OK,
+                        [("Content-Type", "text/html; charset=utf-8")],
+                        html,
+                    )
+                        .into_response();
+                }
+                log::info!(
+                    "  [oauth] session authenticated oid={} upn={} session={session_id}",
+                    caller.oid,
+                    caller.upn
+                );
+                {
+                    let mut sessions = state.sessions.write().await;
+                    sessions.retain(|_, v| v.created_at.elapsed().as_secs() < 86400);
+                    sessions.insert(
+                        session_id.clone(),
+                        SessionInfo {
+                            upn: caller.upn,
+                            oid: caller.oid,
+                            roles: caller.roles,
+                            created_at: Instant::now(),
+                        },
+                    );
+                }
+                {
+                    let pending = state.pending_sessions.read().await;
+                    if let Some(tx) = pending.get(&session_id) {
+                        tx.send(Some(PendingAuthResult::Success)).ok();
+                    }
+                }
+                let html = "<html><body style='font-family:sans-serif;text-align:center;padding:60px'>\
+                    <h2>✅ Authentication successful</h2>\
+                    <p>You can close this tab and return to your conversation.</p>\
+                    </body></html>";
+                return (
+                    StatusCode::OK,
+                    [("Content-Type", "text/html; charset=utf-8")],
+                    html,
+                )
+                    .into_response();
+            }
+            Err(reason) => {
+                log::warn!("  [oauth] FAIL JWT validation for session={session_id}: {reason}");
+                let pending = state.pending_sessions.read().await;
+                if let Some(tx) = pending.get(&session_id) {
+                    tx.send(Some(PendingAuthResult::Failure {
+                        error: "invalid_token".to_string(),
+                        description: reason.clone(),
+                    }))
+                    .ok();
+                }
+                let html = build_auth_error_page("invalid_token", &reason, None);
+                return (
+                    StatusCode::OK,
+                    [("Content-Type", "text/html; charset=utf-8")],
+                    html,
+                )
+                    .into_response();
+            }
+        }
+    }
 
     let server_code = random_string(40);
     {
@@ -421,7 +730,75 @@ pub async fn callback_handler(
         url_encode(&server_code),
         url_encode(&pkce_entry.client_state),
     );
+
+    // Resolve the long-poll waiter with the success code.
+    if !pkce_entry.client_state.is_empty() {
+        let mut results = state.auth_results.write().await;
+        results.insert(
+            pkce_entry.client_state.clone(),
+            AuthFlowResult::Complete {
+                code: server_code,
+                redirect_uri: pkce_entry.client_redirect_uri.clone(),
+            },
+        );
+    }
+
     Redirect::temporary(&redirect).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Long-poll: GET /mcp/auth/wait?state=<client_state>
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct AuthWaitParams {
+    pub state: String,
+}
+
+/// Long-polls until the OAuth flow for `state` resolves or 90 s elapse.
+/// Returns JSON matching the `AuthFlowResult` shape:
+///   `{"status":"pending"}` on timeout
+///   `{"status":"complete","code":"...","redirect_uri":"..."}`
+///   `{"status":"error","error":"...","error_description":"..."}`
+pub async fn auth_wait_handler(
+    State(state): State<AppState>,
+    Query(params): Query<AuthWaitParams>,
+) -> Response {
+    if state.entra.is_none() {
+        return (StatusCode::NOT_FOUND, "auth disabled").into_response();
+    }
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(90);
+
+    loop {
+        {
+            let results = state.auth_results.read().await;
+            if let Some(result) = results.get(&params.state) {
+                match result {
+                    AuthFlowResult::Pending => {} // keep waiting
+                    resolved => {
+                        log::debug!(
+                            "  [oauth] auth_wait resolved state={} result={resolved:?}",
+                            params.state
+                        );
+                        return Json(resolved.clone()).into_response();
+                    }
+                }
+            } else {
+                // Unknown state — likely expired or never started.
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"status": "not_found", "error": "unknown or expired state"})),
+                )
+                    .into_response();
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Json(json!({"status": "pending", "message": "timeout waiting for auth"}))
+                .into_response();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
 }
 
 #[derive(Deserialize)]
@@ -434,7 +811,10 @@ pub struct TokenRequest {
     pub client_id: Option<String>,
 }
 
-pub async fn token_handler(State(state): State<AppState>, Form(req): Form<TokenRequest>) -> Response {
+pub async fn token_handler(
+    State(state): State<AppState>,
+    Form(req): Form<TokenRequest>,
+) -> Response {
     if state.entra.is_none() {
         return (StatusCode::NOT_FOUND, "auth disabled").into_response();
     }
@@ -544,16 +924,21 @@ pub async fn validate_jwt(
 pub fn unauthorized_response(public_url: &str, _client_id: &str, description: &str) -> Response {
     let resource_metadata = format!("{public_url}/.well-known/oauth-protected-resource");
     let www_authenticate = format!(
-        "Bearer realm=\"{public_url}\", resource_metadata=\"{resource_metadata}\", scope=\"openid profile email\""
+        "Bearer realm=\"{public_url}\", resource_metadata=\"{resource_metadata}\", scope=\"openid profile\""
     );
     log::debug!("  [oauth] 401 response with WWW-Authenticate: {www_authenticate}");
     (
         StatusCode::UNAUTHORIZED,
         [
             ("WWW-Authenticate", www_authenticate),
-            ("Content-Type", "text/plain".to_string()),
+            ("Content-Type", "application/json".to_string()),
         ],
-        description.to_string(),
+        serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": null,
+            "error": { "code": -32001, "message": format!("Unauthorized: {description}") }
+        }))
+        .unwrap(),
     )
         .into_response()
 }
@@ -570,29 +955,161 @@ pub async fn require_auth(State(state): State<AppState>, req: Request, next: Nex
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
+    // ── No Authorization header ──────────────────────────────────────────────
+    // Generate a new server-managed session, return 401 immediately with the
+    // auth URL.  The LLM should open it, then retry with Bearer <session_id>.
     let token = if let Some(t) = auth_header.strip_prefix("Bearer ") {
         t.to_string()
     } else {
-        log::warn!("  [oauth] FAIL missing Authorization header");
-        return unauthorized_response(&entra.url, &entra.client_id, "missing Authorization header");
+        let session_id = random_string(32);
+        let auth_url = format!("{}/auth/start?session={}", entra.url, session_id);
+        log::info!("  [oauth] new session={session_id} — returning auth URL to LLM");
+        {
+            let (tx, _) = watch::channel::<Option<PendingAuthResult>>(None);
+            let mut pending = state.pending_sessions.write().await;
+            pending.retain(|_, tx| tx.receiver_count() > 0); // prune abandoned sessions
+            pending.insert(session_id.clone(), tx);
+        }
+        // Do NOT include WWW-Authenticate here — that header triggers the Copilot
+        // CLI to launch its own parallel PKCE flow (with its own local callback
+        // server), which races with our server-managed long-poll flow and causes the
+        // LLM to hang.  The body already contains everything the LLM needs.
+        return (
+            StatusCode::UNAUTHORIZED,
+            [("Content-Type", "application/json".to_string())],
+            serde_json::to_string(&json!({
+                "jsonrpc": "2.0",
+                "id": null,
+                "error": {
+                    "code": -32001,
+                    "message": "Authentication required. Open the auth_url in your browser, then retry with Authorization: Bearer <session_id>.",
+                    "data": {
+                        "auth_url": auth_url,
+                        "session_id": session_id,
+                    }
+                }
+            })).unwrap(),
+        ).into_response();
     };
 
+    // ── Bearer token is a pending session_id → long-poll ─────────────────────
+    // The LLM retries immediately after receiving the 401 above; we hold this
+    // connection open until the browser auth completes (up to 5 minutes).
+    let maybe_rx = {
+        let pending = state.pending_sessions.read().await;
+        pending.get(&token).map(|tx| tx.subscribe())
+    };
+    if let Some(mut rx) = maybe_rx {
+        log::info!("  [oauth] long-poll started for session={}", token);
+        let result = tokio::time::timeout(std::time::Duration::from_secs(300), async {
+            loop {
+                if rx.borrow().is_some() {
+                    break;
+                }
+                if rx.changed().await.is_err() {
+                    break;
+                }
+            }
+            rx.borrow().clone()
+        })
+        .await;
+
+        // Clean up the pending entry regardless of outcome.
+        state.pending_sessions.write().await.remove(&token);
+
+        return match result {
+            Ok(Some(PendingAuthResult::Success)) => {
+                log::info!(
+                    "  [oauth] long-poll resolved: auth success session={}",
+                    token
+                );
+                (
+                    StatusCode::OK,
+                    [("Content-Type", "application/json")],
+                    serde_json::to_string(&json!({
+                        "jsonrpc": "2.0",
+                        "id": null,
+                        "result": {
+                            "_mcp_auth": "complete",
+                            "session_token": token,
+                            "message": "Authentication successful. Retry your request with Authorization: Bearer <session_token>."
+                        }
+                    })).unwrap(),
+                ).into_response()
+            }
+            Ok(Some(PendingAuthResult::Failure { error, description })) => {
+                log::warn!(
+                    "  [oauth] long-poll resolved: auth failure={error} session={}",
+                    token
+                );
+                let msg = if description.is_empty() {
+                    format!("Authorization failed: {error}")
+                } else {
+                    format!("Authorization failed: {error} — {description}")
+                };
+                (
+                    StatusCode::OK,
+                    [("Content-Type", "application/json")],
+                    serde_json::to_string(&json!({
+                        "jsonrpc": "2.0",
+                        "id": null,
+                        "error": { "code": -32001, "message": msg }
+                    }))
+                    .unwrap(),
+                )
+                    .into_response()
+            }
+            _ => {
+                log::warn!("  [oauth] long-poll timed out for session={}", token);
+                (
+                    StatusCode::OK,
+                    [("Content-Type", "application/json")],
+                    serde_json::to_string(&json!({
+                        "jsonrpc": "2.0",
+                        "id": null,
+                        "error": { "code": -32001, "message": "Authentication timed out. Please retry." }
+                    })).unwrap(),
+                ).into_response()
+            }
+        };
+    }
+
+    // ── Bearer token is a validated session_id → proceed ─────────────────────
+    {
+        let sessions = state.sessions.read().await;
+        if let Some(info) = sessions.get(&token) {
+            log::debug!("  [oauth] OK session upn={} session={}", info.upn, token);
+            return next.run(req).await;
+        }
+    }
+
+    // ── Bearer token is a JWT (existing PKCE flow) → validate ────────────────
     match validate_jwt(&token, &entra, &state.jwks_cache).await {
         Ok(caller) => {
-            if !caller.roles.contains(&"BillingViewer".to_string()) {
+            if !state.no_role_check && !caller.roles.contains(&"BillingViewer".to_string()) {
                 log::warn!(
                     "  [oauth] FAIL missing_role oid={} upn={} roles={:?}",
-                    caller.oid, caller.upn, caller.roles
+                    caller.oid,
+                    caller.upn,
+                    caller.roles
                 );
                 return (
                     StatusCode::FORBIDDEN,
-                    "missing required App Role: BillingViewer",
+                    [("Content-Type", "application/json")],
+                    serde_json::to_string(&json!({
+                        "jsonrpc": "2.0",
+                        "id": null,
+                        "error": { "code": -32001, "message": "Forbidden: missing required App Role: BillingViewer" }
+                    }))
+                    .unwrap(),
                 )
                     .into_response();
             }
             log::debug!(
-                "  [oauth] OK oid={} upn={} roles={:?}",
-                caller.oid, caller.upn, caller.roles
+                "  [oauth] OK jwt oid={} upn={} roles={:?}",
+                caller.oid,
+                caller.upn,
+                caller.roles
             );
             next.run(req).await
         }
@@ -659,7 +1176,9 @@ pub async fn startup_validate_entra(entra: &EntraConfig, bind_port: u16) {
         Ok(r) => {
             let body: Value = r.json().await.unwrap_or_default();
             if body["error"].is_null() {
-                log::info!("[startup] ✓ Entra client credentials probe OK (client_id/secret valid)");
+                log::info!(
+                    "[startup] ✓ Entra client credentials probe OK (client_id/secret valid)"
+                );
             } else {
                 let err = body["error"].as_str().unwrap_or("?");
                 let desc = body["error_description"].as_str().unwrap_or("");
@@ -685,6 +1204,68 @@ pub async fn startup_validate_entra(entra: &EntraConfig, bind_port: u16) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Render an HTML error page shown in the browser when Entra returns an error
+/// during the OAuth callback.  If `callback_url` is Some, the page uses
+/// `fetch()` to attempt notifying the MCP client's local callback server, then
+/// redirects.  If the client's local server is already gone the page stays
+/// visible so the user sees a clear message instead of ERR_CONNECTION_REFUSED.
+fn build_auth_error_page(error: &str, description: &str, callback_url: Option<&str>) -> String {
+    let notify_script = match callback_url {
+        Some(url) => format!(
+            r#"
+    fetch({url:?})
+      .then(() => {{ window.location.replace({url:?}); }})
+      .catch(() => {{
+        document.getElementById('status').textContent =
+          'The authorisation client could not be reached. You can close this tab and check your CLI for the error.';
+      }});
+"#,
+            url = url
+        ),
+        None => String::new(),
+    };
+
+    let desc_line = if description.is_empty() {
+        String::new()
+    } else {
+        format!("<p class=\"desc\">{}</p>", html_escape(description))
+    };
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Authorisation failed</title>
+  <style>
+    body {{ font-family: system-ui, sans-serif; max-width: 480px; margin: 10vh auto; padding: 0 1rem; color: #222; }}
+    h1   {{ color: #c0392b; font-size: 1.4rem; }}
+    .code {{ font-family: monospace; background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }}
+    .desc {{ color: #555; font-size: .9rem; }}
+    #status {{ margin-top: 1rem; color: #555; font-size: .9rem; }}
+  </style>
+</head>
+<body>
+  <h1>Authorisation failed</h1>
+  <p>Entra returned error: <span class="code">{error}</span></p>
+  {desc_line}
+  <p id="status">Notifying your CLI&hellip;</p>
+  <script>{notify_script}</script>
+</body>
+</html>"#,
+        error = html_escape(error),
+        desc_line = desc_line,
+        notify_script = notify_script,
+    )
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
 
 /// Parse `host` and `port` from a URL like `http://localhost:8091`.
 /// Maps `localhost` → `127.0.0.1` for binding. Returns `None` if unparseable.

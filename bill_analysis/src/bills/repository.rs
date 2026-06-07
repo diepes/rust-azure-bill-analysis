@@ -13,6 +13,7 @@ use crate::find_files;
 pub struct BillRepository {
     data_dir: PathBuf,
     blob: Option<Arc<BlobSource>>,
+    #[allow(clippy::type_complexity)]
     cache: Arc<RwLock<HashMap<(u32, u32), Arc<Bills>>>>,
 }
 
@@ -43,7 +44,9 @@ impl BillRepository {
 
         // Try local CSV first.
         if let Some(csv_path) = find_files::find_bill_csv(&self.data_dir, &month_str) {
-            let filter_opts = FilterOpts { case_sensitive: false };
+            let filter_opts = FilterOpts {
+                case_sensitive: false,
+            };
             let mut bills = Bills::default();
             bills
                 .parse_csv(&csv_path, &filter_opts)
@@ -62,7 +65,9 @@ impl BillRepository {
 
         // Fall back to blob.
         if let Some(blob) = &self.blob {
-            let filter_opts = FilterOpts { case_sensitive: false };
+            let filter_opts = FilterOpts {
+                case_sensitive: false,
+            };
             let bills = blob
                 .load_bills_for_month(year, month, &filter_opts)
                 .await
@@ -71,10 +76,7 @@ impl BillRepository {
                     log::error!("[repo] {msg}");
                     msg
                 })?;
-            log::info!(
-                "[repo] loaded {month_str} from blob ({} rows)",
-                bills.len()
-            );
+            log::info!("[repo] loaded {month_str} from blob ({} rows)", bills.len());
             let bills = Arc::new(bills);
             self.cache
                 .write()
@@ -132,8 +134,7 @@ mod tests {
 
     fn setup_test_csv(tmp: &tempfile::TempDir) {
         let dest = tmp.path().join("2024-03-Detail_test.csv");
-        std::fs::copy("tests/azure_test_data_01.csv", dest)
-            .expect("copy test CSV into tempdir");
+        std::fs::copy("tests/azure_test_data_01.csv", dest).expect("copy test CSV into tempdir");
     }
 
     #[tokio::test]

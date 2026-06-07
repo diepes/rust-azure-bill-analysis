@@ -12,7 +12,9 @@
 
 use azure_core::http::Url;
 use azure_identity::DeveloperToolsCredential;
-use azure_storage_blob::{BlobContainerClient, BlobServiceClient, models::BlobContainerClientListBlobsOptions};
+use azure_storage_blob::{
+    BlobContainerClient, BlobServiceClient, models::BlobContainerClientListBlobsOptions,
+};
 use futures::TryStreamExt;
 use serde::Deserialize;
 use std::error::Error;
@@ -93,7 +95,10 @@ impl BlobSource {
         let credential = DeveloperToolsCredential::new(None)?;
         let service_client = BlobServiceClient::new(service_url, Some(credential), None)?;
         let container_client = service_client.blob_container_client(&config.container_name);
-        Ok(Self { config, container_client })
+        Ok(Self {
+            config,
+            container_client,
+        })
     }
 
     /// Lists all `YYYYMMDD-YYYYMMDD` date-range folder names available under the
@@ -125,15 +130,14 @@ impl BlobSource {
             }
 
             // Strip "{prefix}/" to get "{date-range}/{run-id}/manifest.json".
-            let relative = name
-                .strip_prefix(&list_prefix)
-                .unwrap_or(name.as_str());
+            let relative = name.strip_prefix(&list_prefix).unwrap_or(name.as_str());
 
             // The first path segment is the date-range folder.
-            if let Some(date_range) = relative.split('/').next() {
-                if is_date_range(date_range) && !date_ranges.contains(&date_range.to_string()) {
-                    date_ranges.push(date_range.to_string());
-                }
+            if let Some(date_range) = relative.split('/').next()
+                && is_date_range(date_range)
+                && !date_ranges.contains(&date_range.to_string())
+            {
+                date_ranges.push(date_range.to_string());
             }
         }
 
@@ -161,34 +165,34 @@ impl BlobSource {
     ) -> Result<BlobManifest, Box<dyn Error + Send + Sync>> {
         // Try the local cache first — use it unconditionally when the month is
         // complete (export will never change again).
-        if let Some(manifest) = self.try_load_cached_manifest(year, month)? {
-            if is_month_complete(year, month, &manifest.run_info.end_date) {
-                log::info!(
-                    "[blob] using cached manifest for {year}-{month:02} (endDate={})",
-                    manifest.run_info.end_date
-                );
-                return Ok(manifest);
-            }
+        if let Some(manifest) = self.try_load_cached_manifest(year, month)?
+            && is_month_complete(year, month, &manifest.run_info.end_date)
+        {
+            log::info!(
+                "[blob] using cached manifest for {year}-{month:02} (endDate={})",
+                manifest.run_info.end_date
+            );
+            return Ok(manifest);
         }
 
         // Attempt to fetch the manifest from blob storage.
         match self.fetch_manifest_from_blob(year, month).await {
-            Ok(manifest) => return Ok(manifest),
+            Ok(manifest) => Ok(manifest),
             Err(blob_err) => {
                 // Blob storage unreachable — fall back to the best local manifest
                 // if all its CSV parts are already cached on disk.
-                if let Ok(Some(manifest)) = self.try_load_cached_manifest(year, month) {
-                    if self.all_parts_cached(&manifest) {
-                        log::warn!(
-                            "[blob] blob unreachable for {year}-{month:02} ({}); \
+                if let Ok(Some(manifest)) = self.try_load_cached_manifest(year, month)
+                    && self.all_parts_cached(&manifest)
+                {
+                    log::warn!(
+                        "[blob] blob unreachable for {year}-{month:02} ({}); \
                              falling back to local cache (endDate={})",
-                            blob_err,
-                            manifest.run_info.end_date
-                        );
-                        return Ok(manifest);
-                    }
+                        blob_err,
+                        manifest.run_info.end_date
+                    );
+                    return Ok(manifest);
                 }
-                return Err(blob_err);
+                Err(blob_err)
             }
         }
     }
@@ -238,7 +242,10 @@ impl BlobSource {
                 std::fs::create_dir_all(parent)?;
             }
             std::fs::write(&run_id_path, &bytes)?;
-            log::debug!("[blob] cached manifest (run-id) → {}", run_id_path.display());
+            log::debug!(
+                "[blob] cached manifest (run-id) → {}",
+                run_id_path.display()
+            );
 
             // Also write to the canonical date-range-level path so that
             // try_load_cached_manifest always finds the latest version in one place.
@@ -246,16 +253,16 @@ impl BlobSource {
             let relative = name
                 .strip_prefix(&format!("{}/", self.config.prefix))
                 .unwrap_or(&name);
-            if let Some(date_range) = relative.split('/').next() {
-                if is_date_range(date_range) {
-                    let canonical_blob = format!("{}/{}/manifest.json", self.config.prefix, date_range);
-                    let canonical_path = self.local_path_for_blob(&canonical_blob);
-                    if let Some(parent) = canonical_path.parent() {
-                        std::fs::create_dir_all(parent)?;
-                    }
-                    std::fs::write(&canonical_path, &bytes)?;
-                    log::debug!("[blob] canonical manifest → {}", canonical_path.display());
+            if let Some(date_range) = relative.split('/').next()
+                && is_date_range(date_range)
+            {
+                let canonical_blob = format!("{}/{}/manifest.json", self.config.prefix, date_range);
+                let canonical_path = self.local_path_for_blob(&canonical_blob);
+                if let Some(parent) = canonical_path.parent() {
+                    std::fs::create_dir_all(parent)?;
                 }
+                std::fs::write(&canonical_path, &bytes)?;
+                log::debug!("[blob] canonical manifest → {}", canonical_path.display());
             }
 
             return Ok(manifest);
@@ -346,7 +353,11 @@ impl BlobSource {
             } else {
                 log::info!("[blob] downloading: {}", blob_info.blob_name);
                 let bytes = self.download_blob(&blob_info.blob_name).await?;
-                log::debug!("[blob] writing {} bytes → {}", bytes.len(), local_path.display());
+                log::debug!(
+                    "[blob] writing {} bytes → {}",
+                    bytes.len(),
+                    local_path.display()
+                );
                 if let Some(parent) = local_path.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
@@ -364,7 +375,11 @@ impl BlobSource {
             let mut part = Bills::default();
             part.parse_csv(&local_path, filter_opts)
                 .map_err(|e| -> Box<dyn Error + Send + Sync> { e.to_string().into() })?;
-            log::debug!("[blob] parsed {} entries from {}", part.len(), local_path.display());
+            log::debug!(
+                "[blob] parsed {} entries from {}",
+                part.len(),
+                local_path.display()
+            );
             match merged.as_mut() {
                 None => merged = Some(part),
                 Some(existing) => existing.extend_with(part),
@@ -428,7 +443,7 @@ fn days_in_month(year: u32, month: u32) -> u32 {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
         2 => {
-            if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+            if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) {
                 29
             } else {
                 28
@@ -446,9 +461,13 @@ mod tests {
         BlobManifest {
             blobs: blobs
                 .into_iter()
-                .map(|name| ManifestBlob { blob_name: name.to_string() })
+                .map(|name| ManifestBlob {
+                    blob_name: name.to_string(),
+                })
                 .collect(),
-            run_info: ManifestRunInfo { end_date: end_date.to_string() },
+            run_info: ManifestRunInfo {
+                end_date: end_date.to_string(),
+            },
         }
     }
 
@@ -469,7 +488,9 @@ mod tests {
         dr_dir.push("blob");
         dr_dir.push(container);
         for seg in prefix.split('/') {
-            if !seg.is_empty() { dr_dir.push(seg); }
+            if !seg.is_empty() {
+                dr_dir.push(seg);
+            }
         }
         dr_dir.push(date_range);
         std::fs::create_dir_all(&dr_dir).unwrap();
@@ -484,7 +505,9 @@ mod tests {
         cache_base.push("blob");
         cache_base.push(container);
         for seg in prefix.split('/') {
-            if !seg.is_empty() { cache_base.push(seg); }
+            if !seg.is_empty() {
+                cache_base.push(seg);
+            }
         }
 
         let month_prefix = "202605";
@@ -518,35 +541,52 @@ mod tests {
         // Write a manifest only inside a run-ID subdir (old layout, no canonical).
         let mut run_dir = tmp.path().to_path_buf();
         run_dir.extend(["blob", container]);
-        for seg in prefix.split('/') { if !seg.is_empty() { run_dir.push(seg); } }
+        for seg in prefix.split('/') {
+            if !seg.is_empty() {
+                run_dir.push(seg);
+            }
+        }
         run_dir.extend(["20260501-20260531", "run-abc"]);
         std::fs::create_dir_all(&run_dir).unwrap();
         std::fs::write(
             run_dir.join("manifest.json"),
             r#"{"blobs":[],"runInfo":{"endDate":"2026-05-20T00:00:00"}}"#,
-        ).unwrap();
+        )
+        .unwrap();
 
         // The canonical path (date-range dir, no run-ID) should NOT exist.
         let canonical = run_dir.parent().unwrap().join("manifest.json");
-        assert!(!canonical.exists(), "canonical manifest should not exist yet");
+        assert!(
+            !canonical.exists(),
+            "canonical manifest should not exist yet"
+        );
 
         // Simulate try_load_cached_manifest: it only checks date_range/manifest.json.
         let mut cache_base = tmp.path().to_path_buf();
         cache_base.extend(["blob", container]);
-        for seg in prefix.split('/') { if !seg.is_empty() { cache_base.push(seg); } }
+        for seg in prefix.split('/') {
+            if !seg.is_empty() {
+                cache_base.push(seg);
+            }
+        }
 
         let mut found = false;
         for dr_entry in std::fs::read_dir(&cache_base).unwrap() {
             let dr_entry = dr_entry.unwrap();
             let dr_name = dr_entry.file_name();
             let s = dr_name.to_string_lossy();
-            if !s.starts_with("202605") || !is_date_range(&s) { continue; }
+            if !s.starts_with("202605") || !is_date_range(&s) {
+                continue;
+            }
             if dr_entry.path().join("manifest.json").exists() {
                 found = true;
             }
         }
 
-        assert!(!found, "should not find a manifest when only run-ID copy exists");
+        assert!(
+            !found,
+            "should not find a manifest when only run-ID copy exists"
+        );
     }
 
     // ---------------------------------------------------------------------------
@@ -558,8 +598,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let manifest = make_manifest(
             "2026-05-20T00:00:00",
-            vec!["myorg/costs/20260501-20260531/run/part_0.csv",
-                 "myorg/costs/20260501-20260531/run/part_1.csv"],
+            vec![
+                "myorg/costs/20260501-20260531/run/part_0.csv",
+                "myorg/costs/20260501-20260531/run/part_1.csv",
+            ],
         );
         // Write both CSV files into blob/billing/...
         for blob in &manifest.blobs {
@@ -567,17 +609,28 @@ mod tests {
             p.push("blob");
             p.push("billing");
             for seg in blob.blob_name.split('/') {
-                if !seg.is_empty() { p.push(seg); }
+                if !seg.is_empty() {
+                    p.push(seg);
+                }
             }
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(&p, b"x").unwrap();
         }
-        let all_present = manifest.blobs.iter().filter(|b| b.blob_name.ends_with(".csv")).all(|b| {
-            let mut p = tmp.path().to_path_buf();
-            p.push("blob"); p.push("billing");
-            for seg in b.blob_name.split('/') { if !seg.is_empty() { p.push(seg); } }
-            p.exists()
-        });
+        let all_present = manifest
+            .blobs
+            .iter()
+            .filter(|b| b.blob_name.ends_with(".csv"))
+            .all(|b| {
+                let mut p = tmp.path().to_path_buf();
+                p.push("blob");
+                p.push("billing");
+                for seg in b.blob_name.split('/') {
+                    if !seg.is_empty() {
+                        p.push(seg);
+                    }
+                }
+                p.exists()
+            });
         assert!(all_present);
     }
 
@@ -586,25 +639,39 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let manifest = make_manifest(
             "2026-05-20T00:00:00",
-            vec!["myorg/costs/20260501-20260531/run/part_0.csv",
-                 "myorg/costs/20260501-20260531/run/part_1.csv"],
+            vec![
+                "myorg/costs/20260501-20260531/run/part_0.csv",
+                "myorg/costs/20260501-20260531/run/part_1.csv",
+            ],
         );
         // Only write the first CSV.
         {
             let mut p = tmp.path().to_path_buf();
-            p.push("blob"); p.push("billing");
+            p.push("blob");
+            p.push("billing");
             for seg in manifest.blobs[0].blob_name.split('/') {
-                if !seg.is_empty() { p.push(seg); }
+                if !seg.is_empty() {
+                    p.push(seg);
+                }
             }
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(&p, b"x").unwrap();
         }
-        let all_present = manifest.blobs.iter().filter(|b| b.blob_name.ends_with(".csv")).all(|b| {
-            let mut p = tmp.path().to_path_buf();
-            p.push("blob"); p.push("billing");
-            for seg in b.blob_name.split('/') { if !seg.is_empty() { p.push(seg); } }
-            p.exists()
-        });
+        let all_present = manifest
+            .blobs
+            .iter()
+            .filter(|b| b.blob_name.ends_with(".csv"))
+            .all(|b| {
+                let mut p = tmp.path().to_path_buf();
+                p.push("blob");
+                p.push("billing");
+                for seg in b.blob_name.split('/') {
+                    if !seg.is_empty() {
+                        p.push(seg);
+                    }
+                }
+                p.exists()
+            });
         assert!(!all_present);
     }
 

@@ -14,27 +14,26 @@ mod oauth_proxy;
 
 use axum::{
     Json, Router,
+    extract::Request,
     extract::State,
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
-    extract::Request,
 };
 use bill_analysis::{
     bills::{
-        cost_query::{query_cost, search_resources, CostQuery, ResourceSearchQuery, round2},
+        cost_query::{CostQuery, ResourceSearchQuery, query_cost, round2, search_resources},
         repository::BillRepository,
     },
     blob_source::{BlobSource, BlobSourceConfig},
 };
 use clap::Parser;
 use oauth_proxy::{
-    AppState,
-    authorize_handler, callback_handler, load_entra_config,
-    oauth_metadata_handler, oauth_protected_resource_handler,
-    parse_bind_addr_from_url, register_handler,
-    require_auth, startup_validate_entra, token_handler,
+    AppState, auth_start_handler, auth_wait_handler, authorize_handler, callback_handler,
+    load_entra_config, oauth_metadata_handler, oauth_protected_resource_handler,
+    parse_bind_addr_from_url, register_handler, require_auth, startup_validate_entra,
+    token_handler,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -66,6 +65,11 @@ struct Args {
     /// Without this flag the server refuses to start if Entra env vars are missing.
     #[arg(long)]
     no_auth: bool,
+
+    /// Skip the BillingViewer App Role check. JWT is still validated.
+    /// Useful for testing the OAuth flow without admin-assigned App Roles.
+    #[arg(long)]
+    no_role_check: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +126,11 @@ impl RpcResponse {
 // ---------------------------------------------------------------------------
 
 async fn mcp_get_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let auth = if state.entra.is_some() { "entra" } else { "disabled" };
+    let auth = if state.entra.is_some() {
+        "entra"
+    } else {
+        "disabled"
+    };
     Json(json!({ "status": "ok", "auth": auth }))
 }
 
@@ -359,7 +367,10 @@ async fn handle_tools_call(req: &RpcRequest, state: &AppState) -> RpcResponse {
             req.id.clone(),
             json!({ "content": [{ "type": "text", "text": text }] }),
         ),
-        Err(e) => RpcResponse::err(req.id.clone(), -32000, e),
+        Err(e) => {
+            log::error!("[mcp] tool '{}' error: {}", tool_name, e);
+            RpcResponse::err(req.id.clone(), -32000, e)
+        }
     }
 }
 
@@ -385,18 +396,30 @@ async fn tool_get_monthly_cost(
         .get("month")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing required argument 'month'".to_string())?;
-    let rg_filter = args.get("resource_group").and_then(|v| v.as_str()).unwrap_or("");
-    let name_filter = args.get("resource_name").and_then(|v| v.as_str()).unwrap_or("");
-    let tag_filter = args.get("tag_filter").and_then(|v| v.as_str()).unwrap_or("");
+    let rg_filter = args
+        .get("resource_group")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let name_filter = args
+        .get("resource_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let tag_filter = args
+        .get("tag_filter")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     let (year, mon) = parse_year_month(month)?;
     let bills = state.repo.get(year, mon).await?;
-    let result = query_cost(&bills, &CostQuery {
-        rg_filter: rg_filter.to_string(),
-        name_filter: name_filter.to_string(),
-        tag_filter: tag_filter.to_string(),
-        date_filter: None,
-    })?;
+    let result = query_cost(
+        &bills,
+        &CostQuery {
+            rg_filter: rg_filter.to_string(),
+            name_filter: name_filter.to_string(),
+            tag_filter: tag_filter.to_string(),
+            date_filter: None,
+        },
+    )?;
 
     Ok(serde_json::to_string_pretty(&json!({
         "cost_usd": round2(result.cost_usd),
@@ -420,18 +443,30 @@ async fn tool_get_daily_cost(
         .get("date")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing required argument 'date'".to_string())?;
-    let rg_filter = args.get("resource_group").and_then(|v| v.as_str()).unwrap_or("");
-    let name_filter = args.get("resource_name").and_then(|v| v.as_str()).unwrap_or("");
-    let tag_filter = args.get("tag_filter").and_then(|v| v.as_str()).unwrap_or("");
+    let rg_filter = args
+        .get("resource_group")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let name_filter = args
+        .get("resource_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let tag_filter = args
+        .get("tag_filter")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     let (year, mon, _day) = parse_date(date_str)?;
     let bills = state.repo.get(year, mon).await?;
-    let result = query_cost(&bills, &CostQuery {
-        rg_filter: rg_filter.to_string(),
-        name_filter: name_filter.to_string(),
-        tag_filter: tag_filter.to_string(),
-        date_filter: Some(date_str.to_string()),
-    })?;
+    let result = query_cost(
+        &bills,
+        &CostQuery {
+            rg_filter: rg_filter.to_string(),
+            name_filter: name_filter.to_string(),
+            tag_filter: tag_filter.to_string(),
+            date_filter: Some(date_str.to_string()),
+        },
+    )?;
 
     Ok(serde_json::to_string_pretty(&json!({
         "cost_usd": round2(result.cost_usd),
@@ -456,12 +491,36 @@ async fn tool_search_resources(
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing required argument 'month'".to_string())?;
 
-    let rg_filter = args.get("resource_group").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let name_filter = args.get("resource_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let tag_filter = args.get("tag_filter").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let meter_category_filter = args.get("meter_category").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let subscription_filter = args.get("subscription").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let resource_type_filter = args.get("resource_type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let rg_filter = args
+        .get("resource_group")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let name_filter = args
+        .get("resource_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let tag_filter = args
+        .get("tag_filter")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let meter_category_filter = args
+        .get("meter_category")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let subscription_filter = args
+        .get("subscription")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let resource_type_filter = args
+        .get("resource_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let limit = args
         .get("limit")
         .and_then(|v| v.as_u64())
@@ -469,15 +528,18 @@ async fn tool_search_resources(
 
     let (year, mon) = parse_year_month(month)?;
     let bills = state.repo.get(year, mon).await?;
-    let result = search_resources(&bills, &ResourceSearchQuery {
-        rg_filter,
-        name_filter,
-        tag_filter,
-        meter_category_filter,
-        subscription_filter,
-        resource_type_filter,
-        limit,
-    })?;
+    let result = search_resources(
+        &bills,
+        &ResourceSearchQuery {
+            rg_filter,
+            name_filter,
+            tag_filter,
+            meter_category_filter,
+            subscription_filter,
+            resource_type_filter,
+            limit,
+        },
+    )?;
 
     Ok(serde_json::to_string_pretty(&json!({
         "period": month,
@@ -510,9 +572,15 @@ fn parse_date(s: &str) -> Result<(u32, u32, u32), String> {
     if parts.len() != 3 {
         return Err(format!("Invalid date format '{}', expected YYYY-MM-DD", s));
     }
-    let year: u32 = parts[0].parse().map_err(|_| format!("Invalid year in '{}'", s))?;
-    let mon: u32 = parts[1].parse().map_err(|_| format!("Invalid month in '{}'", s))?;
-    let day: u32 = parts[2].parse().map_err(|_| format!("Invalid day in '{}'", s))?;
+    let year: u32 = parts[0]
+        .parse()
+        .map_err(|_| format!("Invalid year in '{}'", s))?;
+    let mon: u32 = parts[1]
+        .parse()
+        .map_err(|_| format!("Invalid month in '{}'", s))?;
+    let day: u32 = parts[2]
+        .parse()
+        .map_err(|_| format!("Invalid day in '{}'", s))?;
     Ok((year, mon, day))
 }
 
@@ -563,15 +631,13 @@ mod tests {
 async fn main() {
     // Load .env: try CWD first, then the project root two levels above the binary
     // (i.e. <project_root>/target/release/<binary> → <project_root>/.env).
-    let env_loaded: Option<std::path::PathBuf> = dotenvy::dotenv()
-        .ok()
-        .or_else(|| {
-            let project_root = std::env::current_exe()
-                .ok()
-                .and_then(|exe| exe.parent()?.parent()?.parent().map(|p| p.to_path_buf()))?;
-            let env_path = project_root.join(".env");
-            dotenvy::from_path(&env_path).ok().map(|_| env_path)
-        });
+    let env_loaded: Option<std::path::PathBuf> = dotenvy::dotenv().ok().or_else(|| {
+        let project_root = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent()?.parent()?.parent().map(|p| p.to_path_buf()))?;
+        let env_path = project_root.join(".env");
+        dotenvy::from_path(&env_path).ok().map(|_| env_path)
+    });
 
     env_logger::Builder::from_env(
         env_logger::Env::default().default_filter_or("bill_analysis=info"),
@@ -609,24 +675,33 @@ async fn main() {
         .and_then(|e| parse_bind_addr_from_url(&e.url))
         .or_else(|| mcp_url.as_ref().and_then(|u| parse_bind_addr_from_url(u)));
     let bind_host = args.host.unwrap_or_else(|| {
-        url_addr.as_ref().map(|(h, _)| h.clone()).unwrap_or_else(|| "127.0.0.1".to_string())
+        url_addr
+            .as_ref()
+            .map(|(h, _)| h.clone())
+            .unwrap_or_else(|| "127.0.0.1".to_string())
     });
-    let bind_port = args.port.unwrap_or_else(|| {
-        url_addr.as_ref().map(|(_, p)| *p).unwrap_or(3000)
-    });
+    let bind_port = args
+        .port
+        .unwrap_or_else(|| url_addr.as_ref().map(|(_, p)| *p).unwrap_or(3000));
 
     if let Some(ref cfg) = entra {
         startup_validate_entra(cfg, bind_port).await;
     }
 
     let blob_source = if let Some(cfg) = BlobSourceConfig::from_env() {
-        log::debug!("[mcp] blob source configured — container '{}', prefix '{}'",
-            cfg.container_name, cfg.prefix);
+        log::debug!(
+            "[mcp] blob source configured — container '{}', prefix '{}'",
+            cfg.container_name,
+            cfg.prefix
+        );
         match BlobSource::new(cfg) {
             Ok(source) => {
                 match source.list_date_range_folders().await {
                     Ok(folders) => {
-                        log::debug!("[mcp] blob source connected; {} date-range folder(s):", folders.len());
+                        log::debug!(
+                            "[mcp] blob source connected; {} date-range folder(s):",
+                            folders.len()
+                        );
                         for f in &folders {
                             log::debug!("[mcp]   {f}");
                         }
@@ -647,9 +722,15 @@ async fn main() {
         None
     };
 
+    let no_role_check = args.no_role_check;
+    if no_role_check && !args.no_auth {
+        log::warn!("[bill_analysis_mcp] --no-role-check set, BillingViewer App Role not enforced");
+    }
+
     let state = AppState::new(
         Arc::new(BillRepository::new(args.data_dir.clone(), blob_source)),
         entra,
+        no_role_check,
     );
 
     let app = Router::new()
@@ -659,16 +740,36 @@ async fn main() {
                 .route_layer(middleware::from_fn_with_state(state.clone(), require_auth))
                 .get(mcp_get_handler),
         )
-        .route("/.well-known/oauth-authorization-server", get(oauth_metadata_handler))
-        .route("/.well-known/oauth-authorization-server/mcp", get(oauth_metadata_handler))
-        .route("/.well-known/openid-configuration/mcp", get(oauth_metadata_handler))
-        .route("/.well-known/oauth-protected-resource", get(oauth_protected_resource_handler))
-        .route("/.well-known/oauth-protected-resource/mcp", get(oauth_protected_resource_handler))
-        .route("/mcp/.well-known/oauth-protected-resource", get(oauth_protected_resource_handler))
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(oauth_metadata_handler),
+        )
+        .route(
+            "/.well-known/oauth-authorization-server/mcp",
+            get(oauth_metadata_handler),
+        )
+        .route(
+            "/.well-known/openid-configuration/mcp",
+            get(oauth_metadata_handler),
+        )
+        .route(
+            "/.well-known/oauth-protected-resource",
+            get(oauth_protected_resource_handler),
+        )
+        .route(
+            "/.well-known/oauth-protected-resource/mcp",
+            get(oauth_protected_resource_handler),
+        )
+        .route(
+            "/mcp/.well-known/oauth-protected-resource",
+            get(oauth_protected_resource_handler),
+        )
         .route("/authorize", get(authorize_handler))
+        .route("/auth/start", get(auth_start_handler))
         .route("/callback", get(callback_handler))
         .route("/token", post(token_handler))
         .route("/register", post(register_handler))
+        .route("/mcp/auth/wait", get(auth_wait_handler))
         .with_state(state)
         .layer(middleware::from_fn(log_request));
 

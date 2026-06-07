@@ -617,7 +617,11 @@ mod tests {
             ("rg-b", CostType::ResourceGroup, 50.0, CostSource::Original),
             ("rg-c", CostType::ResourceGroup, 10.0, CostSource::Original),
         ]);
-        let opts = DisplayOpts { cost_min_display: 0.0, tag_list: false, debug: false };
+        let opts = DisplayOpts {
+            cost_min_display: 0.0,
+            tag_list: false,
+            debug: false,
+        };
         let plan = build_display_plan(&summary, CostType::ResourceGroup, &opts);
         assert_eq!(plan.rows.len(), 3, "expected 3 rows in plan");
         assert_eq!(plan.skipped_count, 0);
@@ -625,12 +629,23 @@ mod tests {
 
     #[test]
     fn build_display_plan_secondary_is_green() {
-        let summary = make_summary(&[
-            ("secondary-rg", CostType::ResourceGroup, 75.0, CostSource::Secondary),
-        ]);
-        let opts = DisplayOpts { cost_min_display: 0.0, tag_list: false, debug: false };
+        let summary = make_summary(&[(
+            "secondary-rg",
+            CostType::ResourceGroup,
+            75.0,
+            CostSource::Secondary,
+        )]);
+        let opts = DisplayOpts {
+            cost_min_display: 0.0,
+            tag_list: false,
+            debug: false,
+        };
         let plan = build_display_plan(&summary, CostType::ResourceGroup, &opts);
         let row = &plan.rows[0];
-        assert_eq!(row.colour, RowColour::Green, "Secondary source should be Green");
+        assert_eq!(
+            row.colour,
+            RowColour::Green,
+            "Secondary source should be Green"
+        );
     }
 }

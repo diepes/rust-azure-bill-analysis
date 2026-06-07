@@ -97,25 +97,25 @@ pub fn query_cost(bills: &Bills, query: &CostQuery) -> Result<CostSummary, Strin
     let mut by_key: HashMap<String, (f64, usize)> = HashMap::new();
 
     for entry in &bills.bills {
-        if let Some(date) = &query.date_filter {
-            if &entry.date != date {
-                continue;
-            }
+        if let Some(date) = &query.date_filter
+            && &entry.date != date
+        {
+            continue;
         }
-        if let Some(re) = &rg_re {
-            if !re.is_match(&entry.resource_group) {
-                continue;
-            }
+        if let Some(re) = &rg_re
+            && !re.is_match(&entry.resource_group)
+        {
+            continue;
         }
-        if let Some(re) = &name_re {
-            if !re.is_match(&entry.resource_name) {
-                continue;
-            }
+        if let Some(re) = &name_re
+            && !re.is_match(&entry.resource_name)
+        {
+            continue;
         }
-        if let Some(re) = &tag_re {
-            if !re.is_match(&entry.tags.value) {
-                continue;
-            }
+        if let Some(re) = &tag_re
+            && !re.is_match(&entry.tags.value)
+        {
+            continue;
         }
 
         let cost = entry.cost_usd.0;
@@ -230,25 +230,37 @@ pub fn search_resources(
     let mut by_resource: HashMap<(String, String), Acc> = HashMap::new();
 
     for entry in &bills.bills {
-        if let Some(re) = &rg_re {
-            if !re.is_match(&entry.resource_group) { continue; }
+        if let Some(re) = &rg_re
+            && !re.is_match(&entry.resource_group)
+        {
+            continue;
         }
-        if let Some(re) = &name_re {
-            if !re.is_match(&entry.resource_name) { continue; }
+        if let Some(re) = &name_re
+            && !re.is_match(&entry.resource_name)
+        {
+            continue;
         }
-        if let Some(re) = &tag_re {
-            if !re.is_match(&entry.tags.value) { continue; }
+        if let Some(re) = &tag_re
+            && !re.is_match(&entry.tags.value)
+        {
+            continue;
         }
-        if let Some(re) = &cat_re {
-            if !re.is_match(&entry.meter_category) { continue; }
+        if let Some(re) = &cat_re
+            && !re.is_match(&entry.meter_category)
+        {
+            continue;
         }
-        if let Some(re) = &sub_re {
-            if !re.is_match(&entry.subscription_name) { continue; }
+        if let Some(re) = &sub_re
+            && !re.is_match(&entry.subscription_name)
+        {
+            continue;
         }
 
         let rtype = extract_resource_type(&entry.resource_id);
-        if let Some(re) = &type_re {
-            if !re.is_match(&rtype) { continue; }
+        if let Some(re) = &type_re
+            && !re.is_match(&rtype)
+        {
+            continue;
         }
 
         let key = (entry.resource_name.clone(), entry.resource_group.clone());
@@ -350,7 +362,10 @@ mod tests {
         ]);
         let r = query_cost(
             &bills,
-            &CostQuery { rg_filter: "prod".into(), ..Default::default() },
+            &CostQuery {
+                rg_filter: "prod".into(),
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(r.row_count, 2);
@@ -366,7 +381,10 @@ mod tests {
         ]);
         let r = query_cost(
             &bills,
-            &CostQuery { name_filter: "sql".into(), ..Default::default() },
+            &CostQuery {
+                name_filter: "sql".into(),
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(r.row_count, 2);
@@ -384,7 +402,10 @@ mod tests {
         ]);
         let r = query_cost(
             &bills,
-            &CostQuery { date_filter: Some("2026-04-01".into()), ..Default::default() },
+            &CostQuery {
+                date_filter: Some("2026-04-01".into()),
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(r.row_count, 2);
@@ -427,7 +448,10 @@ mod tests {
         let bills = make_bills(vec![make_entry("rg-a", "vm-1", 10.0, "2026-04-01")]);
         let r = query_cost(
             &bills,
-            &CostQuery { rg_filter: "nonexistent".into(), ..Default::default() },
+            &CostQuery {
+                rg_filter: "nonexistent".into(),
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(r.row_count, 0);
@@ -449,14 +473,18 @@ mod tests {
 
     #[test]
     fn extract_resource_type_disk() {
-        let id = "/subscriptions/abc/resourceGroups/rg-prod/providers/Microsoft.Compute/disks/my-disk";
+        let id =
+            "/subscriptions/abc/resourceGroups/rg-prod/providers/Microsoft.Compute/disks/my-disk";
         assert_eq!(extract_resource_type(id), "microsoft.compute/disks");
     }
 
     #[test]
     fn extract_resource_type_public_ip() {
         let id = "/subscriptions/abc/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/my-ip";
-        assert_eq!(extract_resource_type(id), "microsoft.network/publicipaddresses");
+        assert_eq!(
+            extract_resource_type(id),
+            "microsoft.network/publicipaddresses"
+        );
     }
 
     #[test]
@@ -491,7 +519,8 @@ mod tests {
 
     #[test]
     fn search_resources_returns_unique_resources() {
-        let ip_id = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/ip1";
+        let ip_id =
+            "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/ip1";
         let disk_id = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/disks/d1";
         let bills = make_bills(vec![
             make_rich_entry("rg-net", "ip-1", 5.0, "Virtual Network", ip_id, "sub-a"),
@@ -502,7 +531,11 @@ mod tests {
         assert_eq!(r.total_resources, 2);
         assert!((r.total_cost_usd - 28.0).abs() < 0.01);
         // ip-1 has two charge rows aggregated
-        let ip = r.resources.iter().find(|x| x.resource_name == "ip-1").unwrap();
+        let ip = r
+            .resources
+            .iter()
+            .find(|x| x.resource_name == "ip-1")
+            .unwrap();
         assert_eq!(ip.charge_rows, 2);
         assert!((ip.total_cost_usd - 8.0).abs() < 0.01);
     }
@@ -516,7 +549,10 @@ mod tests {
         ]);
         let r = search_resources(
             &bills,
-            &ResourceSearchQuery { meter_category_filter: "storage".into(), ..Default::default() },
+            &ResourceSearchQuery {
+                meter_category_filter: "storage".into(),
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(r.total_resources, 1);
@@ -526,11 +562,20 @@ mod tests {
 
     #[test]
     fn search_resources_resource_type_filter() {
-        let ip_id = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/ip1";
-        let vm_id = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm1";
+        let ip_id =
+            "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/ip1";
+        let vm_id =
+            "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm1";
         let bills = make_bills(vec![
             make_rich_entry("rg-net", "my-ip", 5.0, "Virtual Network", ip_id, "sub-a"),
-            make_rich_entry("rg-compute", "my-vm", 50.0, "Virtual Machines", vm_id, "sub-a"),
+            make_rich_entry(
+                "rg-compute",
+                "my-vm",
+                50.0,
+                "Virtual Machines",
+                vm_id,
+                "sub-a",
+            ),
         ]);
         let r = search_resources(
             &bills,
@@ -565,7 +610,10 @@ mod tests {
         let bills = make_bills(entries);
         let r = search_resources(
             &bills,
-            &ResourceSearchQuery { limit: Some(3), ..Default::default() },
+            &ResourceSearchQuery {
+                limit: Some(3),
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(r.total_resources, 10);
