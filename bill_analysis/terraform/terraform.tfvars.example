@@ -1,0 +1,9 @@
+# Local dev — copy to terraform.tfvars and fill in your values.
+# Do NOT commit terraform.tfvars (it contains the mcp_public_url and user list).
+
+mcp_public_url = "http://localhost:8091"
+
+# Users to assign the BillingViewer role (must exist in the tenant)
+billing_viewer_upns = [
+  # "microsoft@vigor.nz",
+]

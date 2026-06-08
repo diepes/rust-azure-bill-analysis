@@ -10,8 +10,9 @@
 //!   {prefix}/{YYYYMMDD-YYYYMMDD}/{run-id-guid}/part_0_0001.csv
 //!   ...
 
+use azure_core::credentials::Secret;
 use azure_core::http::Url;
-use azure_identity::DeveloperToolsCredential;
+use azure_identity::{ClientSecretCredential, DeveloperToolsCredential};
 use azure_storage_blob::{
     BlobContainerClient, BlobServiceClient, models::BlobContainerClientListBlobsOptions,
 };
@@ -87,13 +88,47 @@ pub struct BlobSource {
 }
 
 impl BlobSource {
-    /// Constructs a `BlobSource` using `DeveloperToolsCredential` (chains `az login` /
-    /// `azd login`). Works locally; production deployments should extend this with
-    /// `ManagedIdentityCredential` / `WorkloadIdentityCredential` when needed.
+    /// Constructs a `BlobSource`.
+    ///
+    /// Credential selection (first match wins):
+    ///   1. `AZ_BLOB_USE_SPN=true` AND `ENTRA_*` vars set → `ClientSecretCredential`
+    ///      Use this when the storage account is in the same tenant as the app SPN.
+    ///   2. Fallback → `DeveloperToolsCredential` (chains `az login` / `azd login` / env vars)
+    ///      Use this for local dev against production storage in a different tenant.
     pub fn new(config: BlobSourceConfig) -> azure_core::Result<Self> {
         let service_url = Url::parse(&config.blob_service_url)?;
-        let credential = DeveloperToolsCredential::new(None)?;
-        let service_client = BlobServiceClient::new(service_url, Some(credential), None)?;
+
+        let use_spn = std::env::var("AZ_BLOB_USE_SPN")
+            .ok()
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+
+        let spn = if use_spn {
+            (|| {
+                let tenant = std::env::var("ENTRA_TENANT_ID").ok().filter(|s| !s.is_empty())?;
+                let client = std::env::var("ENTRA_CLIENT_ID").ok().filter(|s| !s.is_empty())?;
+                let secret = std::env::var("ENTRA_CLIENT_SECRET").ok().filter(|s| !s.is_empty())?;
+                Some((tenant, client, secret))
+            })()
+        } else {
+            None
+        };
+
+        let service_client = if let Some((tenant_id, client_id, client_secret)) = spn {
+            log::info!("[blob] using ClientSecretCredential (SPN: {client_id})");
+            let credential = ClientSecretCredential::new(
+                &tenant_id,
+                client_id,
+                Secret::new(client_secret),
+                None,
+            )?;
+            BlobServiceClient::new(service_url, Some(credential), None)?
+        } else {
+            log::info!("[blob] using DeveloperToolsCredential (az login / env)");
+            let credential = DeveloperToolsCredential::new(None)?;
+            BlobServiceClient::new(service_url, Some(credential), None)?
+        };
+
         let container_client = service_client.blob_container_client(&config.container_name);
         Ok(Self {
             config,

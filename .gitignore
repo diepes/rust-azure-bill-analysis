@@ -11,6 +11,8 @@ target/
 
 # Sensitive environment variable files
 .env
+!.env.example
+.env*
 
 # Azure bill's
 Detail_Enrollment_*_*.csv
