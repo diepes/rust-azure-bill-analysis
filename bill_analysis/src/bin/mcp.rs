@@ -694,6 +694,14 @@ async fn main() {
             cfg.container_name,
             cfg.prefix
         );
+        // Extract storage account name early (before cfg is moved)
+        let account_name = cfg
+            .blob_service_url
+            .strip_prefix("https://")
+            .and_then(|s| s.split('.').next())
+            .unwrap_or("<account-name>")
+            .to_string();
+
         match BlobSource::new(cfg) {
             Ok(source) => {
                 match source.list_date_range_folders().await {
@@ -707,7 +715,17 @@ async fn main() {
                         }
                     }
                     Err(e) => {
-                        log::error!("[mcp] ✗ blob connectivity check failed: {e}");
+                        log::error!(
+                            "[mcp] ✗ blob connectivity check failed for storage account '{}': {}",
+                            account_name,
+                            e
+                        );
+                        log::error!(
+                            "[mcp] ℹ if using DefaultAzureCredential, ensure you are authenticated:"
+                        );
+                        let tenant_id = std::env::var("ENTRA_TENANT_ID")
+                            .unwrap_or_else(|_| "<TenantID>".to_string());
+                        log::error!("[mcp]   az login --tenant {}", tenant_id);
                         std::process::exit(1);
                     }
                 }

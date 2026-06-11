@@ -105,9 +105,15 @@ impl BlobSource {
 
         let spn = if use_spn {
             (|| {
-                let tenant = std::env::var("ENTRA_TENANT_ID").ok().filter(|s| !s.is_empty())?;
-                let client = std::env::var("ENTRA_CLIENT_ID").ok().filter(|s| !s.is_empty())?;
-                let secret = std::env::var("ENTRA_CLIENT_SECRET").ok().filter(|s| !s.is_empty())?;
+                let tenant = std::env::var("ENTRA_TENANT_ID")
+                    .ok()
+                    .filter(|s| !s.is_empty())?;
+                let client = std::env::var("ENTRA_CLIENT_ID")
+                    .ok()
+                    .filter(|s| !s.is_empty())?;
+                let secret = std::env::var("ENTRA_CLIENT_SECRET")
+                    .ok()
+                    .filter(|s| !s.is_empty())?;
                 Some((tenant, client, secret))
             })()
         } else {
