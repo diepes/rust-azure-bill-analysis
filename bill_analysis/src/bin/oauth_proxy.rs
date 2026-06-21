@@ -352,6 +352,8 @@ pub async fn authorize_handler(
     };
     log::debug!("  [oauth] /authorize using scope: {scope:?}");
 
+    let client_id = params.client_id.as_deref().unwrap_or("unknown").to_string();
+    let redirect_uri = params.redirect_uri.clone();
     let client_state_key = {
         let mut store = state.pkce_store.write().await;
         store.retain(|_, v| v.created_at.elapsed().as_secs() < 600);
@@ -385,7 +387,11 @@ pub async fn authorize_handler(
         url_encode(&scope),
     );
     log::debug!("  [oauth] /authorize redirecting to Entra: {}", target);
-    Redirect::temporary(&target).into_response()
+    let mut resp = Redirect::temporary(&target).into_response();
+    resp.extensions_mut().insert(super::HandlerLog::msg(format!(
+        "[oauth] /authorize client_id={client_id} redirect_uri={redirect_uri}"
+    )));
+    resp
 }
 
 // ---------------------------------------------------------------------------
@@ -409,7 +415,7 @@ pub async fn auth_start_handler(
         None => return (StatusCode::NOT_FOUND, "auth disabled").into_response(),
     };
 
-    log::info!("  [oauth] /auth/start session={}", params.session);
+    log::debug!("  [oauth] /auth/start session={}", params.session);
 
     // Register this session in pkce_store with an empty client_redirect_uri
     // to mark it as server-managed (no CLI callback server involved).
@@ -439,7 +445,12 @@ pub async fn auth_start_handler(
         url_encode("openid profile"),
     );
     log::debug!("  [oauth] /auth/start redirecting to Entra: {}", target);
-    Redirect::temporary(&target).into_response()
+    let mut resp = Redirect::temporary(&target).into_response();
+    resp.extensions_mut().insert(super::HandlerLog::msg(format!(
+        "[oauth] /auth/start session={}",
+        params.session
+    )));
+    resp
 }
 
 #[derive(Deserialize)]
@@ -653,7 +664,7 @@ pub async fn callback_handler(
                     )
                         .into_response();
                 }
-                log::info!(
+                log::debug!(
                     "  [oauth] session authenticated oid={} upn={} session={session_id}",
                     caller.oid,
                     caller.upn
@@ -664,8 +675,8 @@ pub async fn callback_handler(
                     sessions.insert(
                         session_id.clone(),
                         SessionInfo {
-                            upn: caller.upn,
-                            oid: caller.oid,
+                            upn: caller.upn.clone(),
+                            oid: caller.oid.clone(),
                             roles: caller.roles,
                             created_at: Instant::now(),
                         },
@@ -681,12 +692,17 @@ pub async fn callback_handler(
                     <h2>✅ Authentication successful</h2>\
                     <p>You can close this tab and return to your conversation.</p>\
                     </body></html>";
-                return (
+                let mut resp = (
                     StatusCode::OK,
                     [("Content-Type", "text/html; charset=utf-8")],
                     html,
                 )
                     .into_response();
+                resp.extensions_mut().insert(super::HandlerLog::msg(format!(
+                    "[oauth] session authenticated oid={} upn={} session={session_id}",
+                    caller.oid, caller.upn
+                )));
+                return resp;
             }
             Err(reason) => {
                 log::warn!("  [oauth] FAIL JWT validation for session={session_id}: {reason}");
@@ -724,6 +740,8 @@ pub async fn callback_handler(
         );
     }
 
+    let client_redirect = pkce_entry.client_redirect_uri.clone();
+    let client_state = pkce_entry.client_state.clone();
     let redirect = format!(
         "{}?code={}&state={}",
         pkce_entry.client_redirect_uri,
@@ -743,7 +761,11 @@ pub async fn callback_handler(
         );
     }
 
-    Redirect::temporary(&redirect).into_response()
+    let mut resp = Redirect::temporary(&redirect).into_response();
+    resp.extensions_mut().insert(super::HandlerLog::msg(format!(
+        "[oauth] /callback PKCE complete state={client_state} redirect={client_redirect}"
+    )));
+    resp
 }
 
 // ---------------------------------------------------------------------------
@@ -844,12 +866,17 @@ pub async fn token_handler(
             .into_response();
     }
 
-    Json(json!({
+    let client_id = req.client_id.as_deref().unwrap_or("unknown").to_string();
+    let mut resp = Json(json!({
         "access_token": entry.access_token,
         "token_type": "Bearer",
         "expires_in": 3600,
     }))
-    .into_response()
+    .into_response();
+    resp.extensions_mut().insert(super::HandlerLog::msg(format!(
+        "[oauth] /token issued access_token to client_id={client_id}"
+    )));
+    resp
 }
 
 // ---------------------------------------------------------------------------
@@ -963,7 +990,6 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
     } else {
         let session_id = random_string(32);
         let auth_url = format!("{}/auth/start?session={}", entra.url, session_id);
-        log::info!("  [oauth] new session={session_id} — returning auth URL to LLM");
         {
             let (tx, _) = watch::channel::<Option<PendingAuthResult>>(None);
             let mut pending = state.pending_sessions.write().await;
@@ -974,7 +1000,7 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         // CLI to launch its own parallel PKCE flow (with its own local callback
         // server), which races with our server-managed long-poll flow and causes the
         // LLM to hang.  The body already contains everything the LLM needs.
-        return (
+        let mut resp = (
             StatusCode::UNAUTHORIZED,
             [("Content-Type", "application/json".to_string())],
             serde_json::to_string(&json!({
@@ -990,6 +1016,10 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
                 }
             })).unwrap(),
         ).into_response();
+        resp.extensions_mut().insert(super::HandlerLog::msg(format!(
+            "[oauth] new session={session_id} — returning auth URL to LLM"
+        )));
+        return resp;
     };
 
     // ── Bearer token is a pending session_id → long-poll ─────────────────────
@@ -1000,7 +1030,7 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         pending.get(&token).map(|tx| tx.subscribe())
     };
     if let Some(mut rx) = maybe_rx {
-        log::info!("  [oauth] long-poll started for session={}", token);
+        log::debug!("  [oauth] long-poll started for session={}", token);
         let result = tokio::time::timeout(std::time::Duration::from_secs(300), async {
             loop {
                 if rx.borrow().is_some() {
@@ -1019,11 +1049,7 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
 
         return match result {
             Ok(Some(PendingAuthResult::Success)) => {
-                log::info!(
-                    "  [oauth] long-poll resolved: auth success session={}",
-                    token
-                );
-                (
+                let mut resp = (
                     StatusCode::OK,
                     [("Content-Type", "application/json")],
                     serde_json::to_string(&json!({
@@ -1035,7 +1061,11 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
                             "message": "Authentication successful. Retry your request with Authorization: Bearer <session_token>."
                         }
                     })).unwrap(),
-                ).into_response()
+                ).into_response();
+                resp.extensions_mut().insert(super::HandlerLog::msg(format!(
+                    "[oauth] long-poll auth success session={token}"
+                )));
+                resp
             }
             Ok(Some(PendingAuthResult::Failure { error, description })) => {
                 log::warn!(
@@ -1047,7 +1077,7 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
                 } else {
                     format!("Authorization failed: {error} — {description}")
                 };
-                (
+                let mut resp = (
                     StatusCode::OK,
                     [("Content-Type", "application/json")],
                     serde_json::to_string(&json!({
@@ -1057,11 +1087,15 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
                     }))
                     .unwrap(),
                 )
-                    .into_response()
+                    .into_response();
+                resp.extensions_mut().insert(super::HandlerLog::msg(format!(
+                    "[oauth] long-poll auth failure={error} session={token}"
+                )));
+                resp
             }
             _ => {
                 log::warn!("  [oauth] long-poll timed out for session={}", token);
-                (
+                let mut resp = (
                     StatusCode::OK,
                     [("Content-Type", "application/json")],
                     serde_json::to_string(&json!({
@@ -1069,7 +1103,11 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
                         "id": null,
                         "error": { "code": -32001, "message": "Authentication timed out. Please retry." }
                     })).unwrap(),
-                ).into_response()
+                ).into_response();
+                resp.extensions_mut().insert(super::HandlerLog::msg(format!(
+                    "[oauth] long-poll timeout session={token}"
+                )));
+                resp
             }
         };
     }
@@ -1097,13 +1135,11 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
     match validate_jwt(&token, &entra, &state.jwks_cache).await {
         Ok(caller) => {
             if !state.no_role_check && !caller.roles.contains(&"BillingViewer".to_string()) {
-                log::warn!(
-                    "  [oauth] FAIL missing_role oid={} upn={} roles={:?}",
-                    caller.oid,
-                    caller.upn,
-                    caller.roles
-                );
-                return (
+                let oid = caller.oid.clone();
+                let upn = caller.upn.clone();
+                let roles = format!("{:?}", caller.roles);
+                log::warn!("  [oauth] FAIL missing_role oid={oid} upn={upn} roles={roles}",);
+                let mut resp = (
                     StatusCode::FORBIDDEN,
                     [("Content-Type", "application/json")],
                     serde_json::to_string(&json!({
@@ -1114,6 +1150,10 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
                     .unwrap(),
                 )
                     .into_response();
+                resp.extensions_mut().insert(super::HandlerLog::msg(format!(
+                    "[oauth] FAIL missing_role oid={oid} upn={upn} roles={roles}"
+                )));
+                return resp;
             }
             log::debug!(
                 "  [oauth] OK jwt oid={} upn={} roles={:?}",
@@ -1126,11 +1166,15 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         }
         Err(reason) => {
             log::warn!("  [oauth] FAIL token validation: {reason}");
-            unauthorized_response(
+            let mut resp = unauthorized_response(
                 &entra.url,
                 &entra.client_id,
                 &format!("invalid token: {reason}"),
-            )
+            );
+            resp.extensions_mut().insert(super::HandlerLog::msg(format!(
+                "[oauth] FAIL token validation: {reason}"
+            )));
+            resp
         }
     }
 }

@@ -139,21 +139,79 @@ async fn mcp_get_handler(State(state): State<AppState>) -> impl IntoResponse {
 // HTTP request logging middleware
 // ---------------------------------------------------------------------------
 
+/// Response extension set by a handler so `log_request` can emit one combined
+/// INFO line per request instead of separate handler + middleware lines.
+///
+/// Use `HandlerLog::msg(…)` for plain-message events (auth flows, etc.) or
+/// `HandlerLog::audit(upn, tool, bytes)` for `tools/call` audit lines.
+#[derive(Clone)]
+pub(crate) struct HandlerLog {
+    pub message: String,
+    pub upn: Option<String>,
+    pub tool: Option<String>,
+    pub bytes: Option<usize>,
+}
+
+impl HandlerLog {
+    pub(crate) fn msg(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            upn: None,
+            tool: None,
+            bytes: None,
+        }
+    }
+    pub(crate) fn audit(upn: impl Into<String>, tool: impl Into<String>, bytes: usize) -> Self {
+        Self {
+            message: String::new(),
+            upn: Some(upn.into()),
+            tool: Some(tool.into()),
+            bytes: Some(bytes),
+        }
+    }
+}
+
 async fn log_request(req: Request, next: Next) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
     let is_probe = method == axum::http::Method::GET && uri.path() == "/mcp";
     let start = Instant::now();
     if !is_probe {
-        log::debug!("[http] {} {}", method, uri);
+        log::debug!("[http] → {} {}", method, uri);
     }
     let resp = next.run(req).await;
-    if !is_probe {
-        log::debug!(
-            "[http]   → {} in {:.1}ms",
-            resp.status(),
-            start.elapsed().as_secs_f64() * 1000.0
-        );
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let http_code = resp.status().as_u16();
+    // Emit one INFO line only when the handler attached a HandlerLog.
+    // initialize / ping / tools/list handlers do not attach one → DEBUG only.
+    if let Some(hl) = resp.extensions().get::<HandlerLog>() {
+        match (&hl.upn, &hl.tool, hl.bytes) {
+            (Some(upn), Some(tool), Some(bytes)) => {
+                let upn = upn.as_str();
+                let tool = tool.as_str();
+                tracing::info!(
+                    http_code,
+                    method = method.as_str(),
+                    path = uri.path(),
+                    run_msec = elapsed_ms as u64,
+                    upn,
+                    tool,
+                    bytes
+                );
+            }
+            _ => {
+                let msg = hl.message.as_str();
+                tracing::info!(
+                    http_code,
+                    method = method.as_str(),
+                    path = uri.path(),
+                    run_msec = elapsed_ms as u64,
+                    "{msg}"
+                );
+            }
+        }
+    } else if !is_probe {
+        log::debug!("[http] ← {} {} {:.1}ms", http_code, uri.path(), elapsed_ms);
     }
     resp
 }
@@ -214,12 +272,15 @@ async fn mcp_handler(
     if !tool_name.is_empty() {
         let upn = caller
             .as_ref()
-            .map(|ext| ext.upn.as_str())
-            .unwrap_or("anonymous");
+            .map(|ext| ext.upn.clone())
+            .unwrap_or_else(|| "anonymous".to_string());
         let resp_json = serde_json::to_string(&resp).unwrap_or_default();
         let bytes = resp_json.len();
-        tracing::info!(upn, tool = tool_name, bytes, run_msec = elapsed_ms as u64,);
-        return axum::response::Json(resp).into_response();
+        let mut response = axum::response::Json(resp).into_response();
+        response
+            .extensions_mut()
+            .insert(HandlerLog::audit(upn, tool_name, bytes));
+        return response;
     }
 
     log::debug!("[mcp] ← {method} in {elapsed_ms:.1}ms");

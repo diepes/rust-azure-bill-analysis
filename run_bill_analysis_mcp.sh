@@ -17,7 +17,9 @@ pretty_log() {
             continue
         fi
 
-        ts=$(echo "$line"    | jq -r '.timestamp // ""')
+        # Print raw JSON line first, then pretty output on the next line
+        echo "$line" | jq -C -c .
+
         level=$(echo "$line" | jq -r '.level     // "INFO"')
         target=$(echo "$line" | jq -r '.target   // ""')
         msg=$(echo "$line"   | jq -r '.fields.message // ""')
@@ -39,7 +41,7 @@ pretty_log() {
         if [ -n "$tool" ]; then
             # Structured audit line
             printf "%s%-5s%s %sAUDIT%s  upn=%s%s%s tool=%s%s%s bytes=%s %s%sms%s\n" \
-                "$BOLD$ts$RESET " "$level" "$lvl_color$RESET" \
+                "$BOLD" "$level" "$lvl_color$RESET" \
                 "$BLUE" "$RESET" \
                 "$BOLD" "$upn" "$RESET" \
                 "$CYAN" "$tool" "$RESET" \
@@ -55,8 +57,8 @@ pretty_log() {
                 | sed "s/upn=[^ ]*/${BOLD}&${RESET}/g" \
                 | sed "s/session=[^ ]*/${CYAN}&${RESET}/g")
             short_target="${target##*::}"
-            printf "%s%s %s%-5s%s %-20s  %s\n" \
-                "$BOLD" "$ts" "$RESET$lvl_color" "$level" "$RESET" \
+            printf "%s%-5s%s %-20s  %s\n" \
+                "$lvl_color" "$level" "$RESET" \
                 "$BLUE$short_target$RESET" \
                 "$highlighted"
         fi
@@ -64,4 +66,4 @@ pretty_log() {
 }
 
 cd bill_analysis
-cargo run --bin bill_analysis_mcp -- --data-dir ./csv_data --port 8091 2>&1 | pretty_log
+cargo run --bin bill_analysis_mcp -- --data-dir ./csv_data --port 8091 2>&1 | pretty_log 2>&1
