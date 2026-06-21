@@ -943,7 +943,7 @@ pub fn unauthorized_response(public_url: &str, _client_id: &str, description: &s
         .into_response()
 }
 
-pub async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
+pub async fn require_auth(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     let entra = match &state.entra {
         Some(e) => e.clone(),
         None => return next.run(req).await,
@@ -1075,12 +1075,22 @@ pub async fn require_auth(State(state): State<AppState>, req: Request, next: Nex
     }
 
     // ── Bearer token is a validated session_id → proceed ─────────────────────
-    {
+    let maybe_identity = {
         let sessions = state.sessions.read().await;
-        if let Some(info) = sessions.get(&token) {
-            log::debug!("  [oauth] OK session upn={} session={}", info.upn, token);
-            return next.run(req).await;
-        }
+        sessions.get(&token).map(|info| CallerIdentity {
+            upn: info.upn.clone(),
+            oid: info.oid.clone(),
+            roles: info.roles.clone(),
+        })
+    };
+    if let Some(identity) = maybe_identity {
+        log::debug!(
+            "  [oauth] OK session upn={} session={}",
+            identity.upn,
+            token
+        );
+        req.extensions_mut().insert(identity);
+        return next.run(req).await;
     }
 
     // ── Bearer token is a JWT (existing PKCE flow) → validate ────────────────
@@ -1111,6 +1121,7 @@ pub async fn require_auth(State(state): State<AppState>, req: Request, next: Nex
                 caller.upn,
                 caller.roles
             );
+            req.extensions_mut().insert(caller);
             next.run(req).await
         }
         Err(reason) => {

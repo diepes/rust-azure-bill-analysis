@@ -23,7 +23,8 @@ MCP server that exposes Azure billing data to LLMs via the [Model Context Protoc
 **Quick start:**
 ```bash
 cd bill_analysis
-cargo run --bin bill_analysis_mcp -- --no-auth --data-dir ./csv_data
+# --no-auth
+cargo run --bin bill_analysis_mcp --  --data-dir ./csv_data --port 8091
 ```
 
 See `bill_analysis/CONTEXT.md` for MCP tool reference and OAuth setup.

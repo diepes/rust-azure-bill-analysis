@@ -30,14 +30,15 @@ use bill_analysis::{
 };
 use clap::Parser;
 use oauth_proxy::{
-    AppState, auth_start_handler, auth_wait_handler, authorize_handler, callback_handler,
-    load_entra_config, oauth_metadata_handler, oauth_protected_resource_handler,
+    AppState, CallerIdentity, auth_start_handler, auth_wait_handler, authorize_handler,
+    callback_handler, load_entra_config, oauth_metadata_handler, oauth_protected_resource_handler,
     parse_bind_addr_from_url, register_handler, require_auth, startup_validate_entra,
     token_handler,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{path::PathBuf, sync::Arc, time::Instant};
+use tracing_subscriber::prelude::*;
 
 // ---------------------------------------------------------------------------
 // CLI args
@@ -161,7 +162,11 @@ async fn log_request(req: Request, next: Next) -> Response {
 // MCP request handler
 // ---------------------------------------------------------------------------
 
-async fn mcp_handler(State(state): State<AppState>, Json(req): Json<RpcRequest>) -> Response {
+async fn mcp_handler(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<CallerIdentity>>,
+    Json(req): Json<RpcRequest>,
+) -> Response {
     let start = Instant::now();
     let method = req.method.as_str();
     if let Some(params) = &req.params {
@@ -179,6 +184,19 @@ async fn mcp_handler(State(state): State<AppState>, Json(req): Json<RpcRequest>)
         return StatusCode::ACCEPTED.into_response();
     }
 
+    // Extract tool name before dispatch so we can include it in the audit log.
+    let tool_name = if method == "tools/call" {
+        req.params
+            .as_ref()
+            .and_then(|p| p.as_object())
+            .and_then(|p| p.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string()
+    } else {
+        String::new()
+    };
+
     let resp = match method {
         "initialize" => handle_initialize(&req),
         "ping" => RpcResponse::ok(req.id.clone(), json!({})),
@@ -191,10 +209,20 @@ async fn mcp_handler(State(state): State<AppState>, Json(req): Json<RpcRequest>)
         ),
     };
 
-    log::debug!(
-        "[mcp] ← {method} in {:.1}ms",
-        start.elapsed().as_secs_f64() * 1000.0
-    );
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    if !tool_name.is_empty() {
+        let upn = caller
+            .as_ref()
+            .map(|ext| ext.upn.as_str())
+            .unwrap_or("anonymous");
+        let resp_json = serde_json::to_string(&resp).unwrap_or_default();
+        let bytes = resp_json.len();
+        tracing::info!(upn, tool = tool_name, bytes, run_msec = elapsed_ms as u64,);
+        return axum::response::Json(resp).into_response();
+    }
+
+    log::debug!("[mcp] ← {method} in {elapsed_ms:.1}ms");
     Json(resp).into_response()
 }
 
@@ -639,10 +667,15 @@ async fn main() {
         dotenvy::from_path(&env_path).ok().map(|_| env_path)
     });
 
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("bill_analysis=info"),
-    )
-    .init();
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("bill_analysis=info")),
+        )
+        .with(tracing_subscriber::fmt::layer().json().with_timer(
+            tracing_subscriber::fmt::time::ChronoLocal::new("%Y%m%d-%Hh%M%:z".to_string()),
+        ))
+        .init();
 
     match &env_loaded {
         Some(path) => log::info!("[env] loaded .env from {}", path.display()),
